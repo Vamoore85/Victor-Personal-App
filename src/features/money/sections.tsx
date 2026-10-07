@@ -141,6 +141,7 @@ export function Accounts({ data }: { data: MoneyData }) {
   const [name, setName] = useState("");
   const [type, setType] = useState<AccountType>("checking");
   const [balance, setBalance] = useState("");
+  const [institutionId, setInstitutionId] = useState("");
 
   function add(e: FormEvent) {
     e.preventDefault();
@@ -148,7 +149,7 @@ export function Accounts({ data }: { data: MoneyData }) {
     if (!name.trim() || Number.isNaN(amount)) return;
     setMoneyData((d) => ({
       ...d,
-      accounts: [...d.accounts, { id: newId(), name: name.trim(), type, openingBalance: amount }],
+      accounts: [...d.accounts, { id: newId(), name: name.trim(), type, openingBalance: amount, institutionId }],
     }));
     setName("");
     setBalance("");
@@ -168,11 +169,12 @@ export function Accounts({ data }: { data: MoneyData }) {
   }
 
   const owed = ACCOUNT_TYPES.find((t) => t.value === type)?.liability;
+  const institutionNames = new Map(data.institutions.map((i) => [i.id, i.name]));
 
   return (
     <div className="flex flex-col gap-6">
       <Card title="Add an account">
-        <form onSubmit={add} className="grid gap-3 sm:grid-cols-[1fr_10rem_10rem_auto] sm:items-end">
+        <form onSubmit={add} className="grid gap-3 sm:grid-cols-2 sm:items-end lg:grid-cols-[1fr_9rem_10rem_9rem_auto]">
           <Field label="Name">
             <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="Chase checking" />
           </Field>
@@ -185,6 +187,14 @@ export function Accounts({ data }: { data: MoneyData }) {
           </Field>
           <Field label={owed ? "Amount owed now" : "Balance now"}>
             <input className={inputClass} inputMode="decimal" value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="0.00" />
+          </Field>
+          <Field label="Institution">
+            <select className={inputClass} value={institutionId} onChange={(e) => setInstitutionId(e.target.value)}>
+              <option value="">None</option>
+              {data.institutions.map((i) => (
+                <option key={i.id} value={i.id}>{i.name}</option>
+              ))}
+            </select>
           </Field>
           <button className={buttonClass} disabled={!name.trim()}>Add</button>
         </form>
@@ -201,7 +211,10 @@ export function Accounts({ data }: { data: MoneyData }) {
                 <li key={a.id} className="flex items-center justify-between gap-3 py-3">
                   <div>
                     <p className="font-medium">{a.name}</p>
-                    <p className="text-xs text-zinc-500">{accountTypeLabel(a)}</p>
+                    <p className="text-xs text-zinc-500">
+                      {accountTypeLabel(a)}
+                      {a.institutionId && institutionNames.get(a.institutionId) && ` · ${institutionNames.get(a.institutionId)}`}
+                    </p>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className={`tabular-nums ${b < 0 ? "text-rose-600 dark:text-rose-400" : ""}`}>

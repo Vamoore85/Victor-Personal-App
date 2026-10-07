@@ -6,6 +6,7 @@ import { DEFAULT_CATEGORIES } from "./types";
 import { categoriesInUse, today } from "./calc";
 import { Accounts, Budgets, Overview, Transactions } from "./sections";
 import { Bills } from "./bills";
+import { Institutions } from "./institutions";
 import { ghostButtonClass } from "./ui";
 
 const TABS = [
@@ -14,6 +15,7 @@ const TABS = [
   { id: "transactions", label: "Transactions" },
   { id: "bills", label: "Bills" },
   { id: "budgets", label: "Budgets" },
+  { id: "institutions", label: "Institutions" },
 ];
 
 export function FinancialCenter() {
@@ -86,6 +88,7 @@ export function FinancialCenter() {
       {tab === "transactions" && <Transactions data={data} categories={categories} />}
       {tab === "bills" && <Bills data={data} categories={categories} />}
       {tab === "budgets" && <Budgets data={data} categories={categories} />}
+      {tab === "institutions" && <Institutions data={data} />}
     </div>
   );
 }

@@ -35,6 +35,7 @@ export type Account = {
   // Starting balance when the account was added. For credit cards and loans,
   // enter what you owe as a positive number; it counts against net worth.
   openingBalance: number;
+  institutionId?: string;
 };
 
 export type Transaction = {
@@ -75,6 +76,36 @@ export type Bill = {
   accountId: string; // "" when not tied to an account
   autopay: boolean;
   url?: string; // where the bill is paid (the biller's website or payment page)
+  institutionId?: string; // the company that sends the bill
+};
+
+export const INSTITUTION_TYPES = [
+  "Bank",
+  "Credit union",
+  "Credit card",
+  "Lender",
+  "Investment",
+  "Insurance",
+  "Utility",
+  "Phone & internet",
+  "Housing",
+  "Medical",
+  "Government",
+  "Subscription",
+  "Other",
+];
+
+// A company or organization you have a relationship with. Login details are
+// deliberately not stored here: keep passwords in a password manager.
+export type Institution = {
+  id: string;
+  name: string;
+  type: string;
+  website: string;
+  loginUrl: string;
+  phone: string;
+  memberNumber: string; // last 4 of the account/member/policy number, for reference only
+  notes: string;
 };
 
 export type MoneyData = {
@@ -83,6 +114,7 @@ export type MoneyData = {
   transactions: Transaction[];
   budgets: Budget[];
   bills: Bill[];
+  institutions: Institution[];
 };
 
 export const EMPTY_DATA: MoneyData = {
@@ -91,4 +123,5 @@ export const EMPTY_DATA: MoneyData = {
   transactions: [],
   budgets: [],
   bills: [],
+  institutions: [],
 };

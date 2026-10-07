@@ -28,6 +28,7 @@ function normalize(value: unknown): MoneyData {
     transactions: Array.isArray(v.transactions) ? v.transactions : [],
     budgets: Array.isArray(v.budgets) ? v.budgets : [],
     bills: Array.isArray(v.bills) ? v.bills : [],
+    institutions: Array.isArray(v.institutions) ? v.institutions : [],
   };
 }
 

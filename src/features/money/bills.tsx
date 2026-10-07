@@ -15,6 +15,7 @@ import {
   monthBounds,
   monthLabel,
   nextDueAfter,
+  normalizeUrl,
   shortDate,
   today,
 } from "./calc";
@@ -49,13 +50,6 @@ export function markBillPaid(bill: Bill) {
       : d.bills.filter((b) => b.id !== bill.id);
     return { ...d, transactions, bills };
   });
-}
-
-/** Accepts "duke-energy.com" as well as full URLs. */
-function normalizeUrl(raw: string) {
-  const s = raw.trim();
-  if (!s) return "";
-  return /^https?:\/\//i.test(s) ? s : `https://${s}`;
 }
 
 function BillName({ bill }: { bill: Bill }) {
@@ -128,6 +122,7 @@ type Draft = {
   accountId: string;
   autopay: boolean;
   url: string;
+  institutionId: string;
 };
 
 const blankDraft = (): Draft => ({
@@ -139,6 +134,7 @@ const blankDraft = (): Draft => ({
   accountId: "",
   autopay: false,
   url: "",
+  institutionId: "",
 });
 
 export function Bills({ data, categories }: { data: MoneyData; categories: string[] }) {
@@ -161,6 +157,7 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
       accountId: draft.accountId,
       autopay: draft.autopay,
       url: normalizeUrl(draft.url),
+      institutionId: draft.institutionId,
     };
     setMoneyData((d) => ({
       ...d,
@@ -183,6 +180,7 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
       accountId: b.accountId,
       autopay: b.autopay,
       url: b.url ?? "",
+      institutionId: b.institutionId ?? "",
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -250,7 +248,15 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
               ))}
             </select>
           </Field>
-          <div className="sm:col-span-3">
+          <Field label="Company">
+            <select className={inputClass} value={draft.institutionId} onChange={(e) => set("institutionId", e.target.value)}>
+              <option value="">None</option>
+              {data.institutions.map((i) => (
+                <option key={i.id} value={i.id}>{i.name}</option>
+              ))}
+            </select>
+          </Field>
+          <div className="sm:col-span-2">
             <Field label="Where to pay it (link)">
               <input className={inputClass} inputMode="url" value={draft.url} onChange={(e) => set("url", e.target.value)} placeholder="https://www.duke-energy.com/pay" />
             </Field>

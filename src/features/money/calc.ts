@@ -166,3 +166,10 @@ export function monthBounds(month: string) {
   const last = new Date(y, m, 0).getDate();
   return { start: `${month}-01`, end: `${month}-${String(last).padStart(2, "0")}` };
 }
+
+/** Accepts "duke-energy.com" as well as full URLs. */
+export function normalizeUrl(raw: string) {
+  const s = raw.trim();
+  if (!s) return "";
+  return /^https?:\/\//i.test(s) ? s : `https://${s}`;
+}
