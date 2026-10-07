@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { APP_NAME, APP_TAGLINE, LIFE_AREAS } from "@/config/app";
 
 export default function Home() {
@@ -8,20 +9,34 @@ export default function Home() {
         <p className="mt-2 text-zinc-600 dark:text-zinc-400">{APP_TAGLINE}</p>
       </header>
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {LIFE_AREAS.map((area) => (
-          <div
-            key={area.slug}
-            className="rounded-xl border border-zinc-200 p-5 dark:border-zinc-800"
-          >
-            <h2 className="font-medium">{area.label}</h2>
-            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-              {area.blurb}
-            </p>
-            <p className="mt-3 text-xs uppercase tracking-wide text-zinc-400">
-              Coming soon
-            </p>
-          </div>
-        ))}
+        {LIFE_AREAS.map((area) => {
+          const body = (
+            <>
+              <h2 className="font-medium">{area.label}</h2>
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                {area.blurb}
+              </p>
+              <p className="mt-3 text-xs uppercase tracking-wide text-zinc-400">
+                {area.href ? "Open →" : "Coming soon"}
+              </p>
+            </>
+          );
+          const cardClass =
+            "rounded-xl border border-zinc-200 p-5 dark:border-zinc-800";
+          return area.href ? (
+            <Link
+              key={area.slug}
+              href={area.href}
+              className={`${cardClass} transition-colors hover:border-zinc-400 dark:hover:border-zinc-600`}
+            >
+              {body}
+            </Link>
+          ) : (
+            <div key={area.slug} className={cardClass}>
+              {body}
+            </div>
+          );
+        })}
       </section>
     </main>
   );
