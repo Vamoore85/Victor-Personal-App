@@ -1,6 +1,6 @@
 // Single source of truth for the app's identity.
 // Rename the app by changing APP_NAME here (and "name" in package.json).
-export const APP_NAME = "Life App";
+export const APP_NAME = "Maverick";
 export const APP_TAGLINE = "One place to run my whole life.";
 
 // Life areas shown on the home dashboard. Each will grow into its own module.
