@@ -45,7 +45,7 @@ export function monthTotals(data: MoneyData, month: string) {
   let expenses = 0;
   const byCategory = new Map<string, number>();
   for (const t of data.transactions) {
-    if (!t.date.startsWith(month)) continue;
+    if (!t.date.startsWith(month) || t.transferId) continue;
     if (t.kind === "income") income += t.amount;
     else {
       expenses += t.amount;

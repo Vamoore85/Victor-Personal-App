@@ -39,6 +39,12 @@ export type Account = {
   openingBalance: number;
   institutionId?: string;
   scope?: Scope; // missing means personal
+  last4?: string; // last 4 digits of the card or account number
+  // Credit card details (optional)
+  creditLimit?: number;
+  apr?: number; // percent, e.g. 24.99
+  dueDay?: number; // day of month the payment is due
+  minPayment?: number;
 };
 
 export type Transaction = {
@@ -49,6 +55,9 @@ export type Transaction = {
   kind: "income" | "expense";
   category: string;
   accountId: string;
+  // Set on both halves of a card payment or transfer between your own
+  // accounts, so they don't count as income or spending.
+  transferId?: string;
 };
 
 export type Budget = {
