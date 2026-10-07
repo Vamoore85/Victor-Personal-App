@@ -7,6 +7,8 @@ export const ACCOUNT_TYPES = [
   { value: "loan", label: "Loan", liability: true },
 ] as const;
 
+export type Scope = "personal" | "business";
+
 export type AccountType = (typeof ACCOUNT_TYPES)[number]["value"];
 
 export const DEFAULT_CATEGORIES = [
@@ -36,6 +38,7 @@ export type Account = {
   // enter what you owe as a positive number; it counts against net worth.
   openingBalance: number;
   institutionId?: string;
+  scope?: Scope; // missing means personal
 };
 
 export type Transaction = {
@@ -52,6 +55,7 @@ export type Budget = {
   id: string;
   category: string;
   monthlyLimit: number;
+  scope?: Scope;
 };
 
 export const BILL_FREQUENCIES = [
@@ -77,6 +81,7 @@ export type Bill = {
   autopay: boolean;
   url?: string; // where the bill is paid (the biller's website or payment page)
   institutionId?: string; // the company that sends the bill
+  scope?: Scope;
 };
 
 export const INSTITUTION_TYPES = [
@@ -107,6 +112,7 @@ export type Institution = {
   phone: string;
   memberNumber: string; // last 4 of the account/member/policy number, for reference only
   notes: string;
+  scope?: Scope;
 };
 
 export type MoneyData = {

@@ -2,7 +2,8 @@
 
 import { useState, type FormEvent } from "react";
 import { newId, setMoneyData } from "./store";
-import { BILL_FREQUENCIES, type Bill, type BillFrequency, type MoneyData } from "./types";
+import { BILL_FREQUENCIES, type Bill, type BillFrequency, type MoneyData, type Scope } from "./types";
+import { ScopeBadge, ScopeField, useDefaultScope } from "./scope";
 import {
   addDays,
   billDatesBetween,
@@ -86,6 +87,7 @@ function BillRows({ items, onEdit }: { items: Bill[]; onEdit?: (bill: Bill) => v
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">
               <BillName bill={b} />
+              <ScopeBadge item={b} />
               {b.autopay && (
                 <span className="ml-2 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-500 dark:bg-zinc-800">
                   Autopay
@@ -123,9 +125,10 @@ type Draft = {
   autopay: boolean;
   url: string;
   institutionId: string;
+  scope: Scope;
 };
 
-const blankDraft = (): Draft => ({
+const blankDraft = (scope: Scope = "personal"): Draft => ({
   name: "",
   amount: "",
   frequency: "monthly",
@@ -135,10 +138,12 @@ const blankDraft = (): Draft => ({
   autopay: false,
   url: "",
   institutionId: "",
+  scope,
 });
 
 export function Bills({ data, categories }: { data: MoneyData; categories: string[] }) {
-  const [draft, setDraft] = useState<Draft>(blankDraft);
+  const defaultScope = useDefaultScope();
+  const [draft, setDraft] = useState<Draft>(() => blankDraft(defaultScope));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [month, setMonth] = useState(currentMonth());
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }));
@@ -158,6 +163,7 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
       autopay: draft.autopay,
       url: normalizeUrl(draft.url),
       institutionId: draft.institutionId,
+      scope: draft.scope,
     };
     setMoneyData((d) => ({
       ...d,
@@ -165,7 +171,7 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
         ? d.bills.map((b) => (b.id === editingId ? { ...b, ...fields } : b))
         : [...d.bills, { id: newId(), ...fields }],
     }));
-    setDraft(blankDraft());
+    setDraft(blankDraft(defaultScope));
     setEditingId(null);
   }
 
@@ -181,6 +187,7 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
       autopay: b.autopay,
       url: b.url ?? "",
       institutionId: b.institutionId ?? "",
+      scope: b.scope ?? "personal",
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -188,7 +195,7 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
   function remove() {
     if (!editingId || !confirm("Delete this bill?")) return;
     setMoneyData((d) => ({ ...d, bills: d.bills.filter((b) => b.id !== editingId) }));
-    setDraft(blankDraft());
+    setDraft(blankDraft(defaultScope));
     setEditingId(null);
   }
 
@@ -256,7 +263,8 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
               ))}
             </select>
           </Field>
-          <div className="sm:col-span-2">
+          <ScopeField value={draft.scope} onChange={(v) => set("scope", v)} />
+          <div className="sm:col-span-3">
             <Field label="Where to pay it (link)">
               <input className={inputClass} inputMode="url" value={draft.url} onChange={(e) => set("url", e.target.value)} placeholder="https://www.duke-energy.com/pay" />
             </Field>
@@ -271,7 +279,7 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
             </button>
             {editingId && (
               <>
-                <button type="button" className={ghostButtonClass} onClick={() => { setEditingId(null); setDraft(blankDraft()); }}>
+                <button type="button" className={ghostButtonClass} onClick={() => { setEditingId(null); setDraft(blankDraft(defaultScope)); }}>
                   Cancel
                 </button>
                 <button type="button" className="px-2 text-sm text-rose-600" onClick={remove}>

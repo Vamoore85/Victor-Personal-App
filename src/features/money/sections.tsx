@@ -5,7 +5,15 @@ import { newId, setMoneyData } from "./store";
 import { ACCOUNT_TYPES, type AccountType, type MoneyData, type Transaction } from "./types";
 import { accountBalance, accountTypeLabel, currentMonth, isLiability, money, monthLabel, monthTotals, today } from "./calc";
 import { UpcomingBills } from "./bills";
+import { ScopeBadge, ScopeField, filterByScope, scopeOf, useDefaultScope } from "./scope";
+import type { Budget } from "./types";
+import type { Scope } from "./types";
 import { Bar, Card, Empty, Field, Stat, buttonClass, ghostButtonClass, inputClass } from "./ui";
+
+/** Spending against a budget counts only transactions in the budget's own book. */
+function budgetSpent(data: MoneyData, b: Budget, month: string) {
+  return monthTotals(filterByScope(data, scopeOf(b)), month).byCategory.get(b.category) ?? 0;
+}
 
 function parseAmount(s: string) {
   const n = Number(s.replace(/[$,\s]/g, ""));
@@ -89,11 +97,11 @@ export function Overview({ data, goTo }: { data: MoneyData; goTo: (tab: string) 
           ) : (
             <ul className="flex flex-col gap-3">
               {data.budgets.map((b) => {
-                const spent = totals.byCategory.get(b.category) ?? 0;
+                const spent = budgetSpent(data, b, month);
                 return (
                   <li key={b.id}>
                     <div className="mb-1 flex justify-between text-sm">
-                      <span>{b.category}</span>
+                      <span>{b.category}<ScopeBadge item={b} /></span>
                       <span className="tabular-nums text-zinc-500">
                         {money(spent)} / {money(b.monthlyLimit)}
                       </span>
@@ -142,6 +150,9 @@ export function Accounts({ data }: { data: MoneyData }) {
   const [type, setType] = useState<AccountType>("checking");
   const [balance, setBalance] = useState("");
   const [institutionId, setInstitutionId] = useState("");
+  const defaultScope = useDefaultScope();
+  const [scopeChoice, setScope] = useState<Scope | null>(null);
+  const scope = scopeChoice ?? defaultScope;
 
   function add(e: FormEvent) {
     e.preventDefault();
@@ -149,7 +160,7 @@ export function Accounts({ data }: { data: MoneyData }) {
     if (!name.trim() || Number.isNaN(amount)) return;
     setMoneyData((d) => ({
       ...d,
-      accounts: [...d.accounts, { id: newId(), name: name.trim(), type, openingBalance: amount, institutionId }],
+      accounts: [...d.accounts, { id: newId(), name: name.trim(), type, openingBalance: amount, institutionId, scope }],
     }));
     setName("");
     setBalance("");
@@ -174,7 +185,7 @@ export function Accounts({ data }: { data: MoneyData }) {
   return (
     <div className="flex flex-col gap-6">
       <Card title="Add an account">
-        <form onSubmit={add} className="grid gap-3 sm:grid-cols-2 sm:items-end lg:grid-cols-[1fr_9rem_10rem_9rem_auto]">
+        <form onSubmit={add} className="grid gap-3 sm:grid-cols-2 sm:items-end lg:grid-cols-3">
           <Field label="Name">
             <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="Chase checking" />
           </Field>
@@ -196,7 +207,8 @@ export function Accounts({ data }: { data: MoneyData }) {
               ))}
             </select>
           </Field>
-          <button className={buttonClass} disabled={!name.trim()}>Add</button>
+          <ScopeField value={scope} onChange={setScope} />
+          <button className={buttonClass} disabled={!name.trim()}>Add account</button>
         </form>
       </Card>
 
@@ -210,7 +222,10 @@ export function Accounts({ data }: { data: MoneyData }) {
               return (
                 <li key={a.id} className="flex items-center justify-between gap-3 py-3">
                   <div>
-                    <p className="font-medium">{a.name}</p>
+                    <p className="font-medium">
+                      {a.name}
+                      <ScopeBadge item={a} />
+                    </p>
                     <p className="text-xs text-zinc-500">
                       {accountTypeLabel(a)}
                       {a.institutionId && institutionNames.get(a.institutionId) && ` · ${institutionNames.get(a.institutionId)}`}
@@ -369,8 +384,10 @@ function TransactionList({ data, items, deletable }: { data: MoneyData; items: T
 export function Budgets({ data, categories }: { data: MoneyData; categories: string[] }) {
   const [category, setCategory] = useState("Groceries");
   const [limit, setLimit] = useState("");
+  const defaultScope = useDefaultScope();
+  const [scopeChoice, setScope] = useState<Scope | null>(null);
+  const scope = scopeChoice ?? defaultScope;
   const month = currentMonth();
-  const totals = monthTotals(data, month);
 
   function add(e: FormEvent) {
     e.preventDefault();
@@ -378,22 +395,25 @@ export function Budgets({ data, categories }: { data: MoneyData; categories: str
     const cat = category.trim();
     if (!cat || Number.isNaN(n) || n <= 0) return;
     setMoneyData((d) => {
-      const existing = d.budgets.find((b) => b.category.toLowerCase() === cat.toLowerCase());
+      // Personal and business each keep their own budget per category.
+      const existing = d.budgets.find(
+        (b) => b.category.toLowerCase() === cat.toLowerCase() && (b.scope ?? "personal") === scope,
+      );
       const budgets = existing
         ? d.budgets.map((b) => (b.id === existing.id ? { ...b, monthlyLimit: n } : b))
-        : [...d.budgets, { id: newId(), category: cat, monthlyLimit: n }];
+        : [...d.budgets, { id: newId(), category: cat, monthlyLimit: n, scope }];
       return { ...d, budgets };
     });
     setLimit("");
   }
 
   const totalLimit = data.budgets.reduce((s, b) => s + b.monthlyLimit, 0);
-  const totalSpent = data.budgets.reduce((s, b) => s + (totals.byCategory.get(b.category) ?? 0), 0);
+  const totalSpent = data.budgets.reduce((s, b) => s + (budgetSpent(data, b, month)), 0);
 
   return (
     <div className="flex flex-col gap-6">
       <Card title="Set a monthly budget">
-        <form onSubmit={add} className="grid gap-3 sm:grid-cols-[1fr_10rem_auto] sm:items-end">
+        <form onSubmit={add} className="grid gap-3 sm:grid-cols-[1fr_10rem_10rem_auto] sm:items-end">
           <Field label="Category">
             <input className={inputClass} list="budget-categories" value={category} onChange={(e) => setCategory(e.target.value)} />
           </Field>
@@ -403,9 +423,10 @@ export function Budgets({ data, categories }: { data: MoneyData; categories: str
           <Field label="Monthly limit">
             <input className={inputClass} inputMode="decimal" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder="500" />
           </Field>
+          <ScopeField value={scope} onChange={setScope} />
           <button className={buttonClass} disabled={!limit}>Save</button>
         </form>
-        <p className="mt-2 text-xs text-zinc-500">Saving a category that already has a budget updates its limit.</p>
+        <p className="mt-2 text-xs text-zinc-500">Saving a category that already has a budget in the same book updates its limit.</p>
       </Card>
 
       <Card title={`${monthLabel(month)} budgets`}>
@@ -418,12 +439,12 @@ export function Budgets({ data, categories }: { data: MoneyData; categories: str
             </p>
             <ul className="flex flex-col gap-4">
               {data.budgets.map((b) => {
-                const spent = totals.byCategory.get(b.category) ?? 0;
+                const spent = budgetSpent(data, b, month);
                 const left = b.monthlyLimit - spent;
                 return (
                   <li key={b.id}>
                     <div className="mb-1 flex items-center justify-between gap-3 text-sm">
-                      <span className="font-medium">{b.category}</span>
+                      <span className="font-medium">{b.category}<ScopeBadge item={b} /></span>
                       <span className="flex items-center gap-3">
                         <span className={`tabular-nums ${left < 0 ? "text-rose-600 dark:text-rose-400" : "text-zinc-500"}`}>
                           {left >= 0 ? `${money(left)} left` : `${money(-left)} over`}

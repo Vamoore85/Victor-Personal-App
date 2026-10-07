@@ -2,7 +2,8 @@
 
 import { useState, type FormEvent } from "react";
 import { newId, setMoneyData } from "./store";
-import { INSTITUTION_TYPES, type Institution, type MoneyData } from "./types";
+import { INSTITUTION_TYPES, type Institution, type MoneyData, type Scope } from "./types";
+import { ScopeBadge, ScopeField, useDefaultScope } from "./scope";
 import { accountBalance, accountTypeLabel, isLiability, money, normalizeUrl, shortDate } from "./calc";
 import { InstitutionLogins, VaultBar } from "./vault-ui";
 import { Card, Empty, Field, buttonClass, ghostButtonClass, inputClass } from "./ui";
@@ -49,7 +50,8 @@ const STARTERS: Draft[] = [
   },
 ];
 
-const blankDraft = (): Draft => ({
+const blankDraft = (scope: Scope = "personal"): Draft => ({
+  scope,
   name: "",
   type: "Bank",
   website: "",
@@ -71,7 +73,8 @@ function hostOf(url: string) {
 }
 
 export function Institutions({ data }: { data: MoneyData }) {
-  const [draft, setDraft] = useState<Draft>(blankDraft);
+  const defaultScope = useDefaultScope();
+  const [draft, setDraft] = useState<Draft>(() => blankDraft(defaultScope));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [filter, setFilter] = useState("All");
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }));
@@ -94,7 +97,7 @@ export function Institutions({ data }: { data: MoneyData }) {
         ? d.institutions.map((i) => (i.id === editingId ? { ...i, ...fields } : i))
         : [...d.institutions, { id: newId(), ...fields }],
     }));
-    setDraft(blankDraft());
+    setDraft(blankDraft(defaultScope));
     setEditingId(null);
   }
 
@@ -114,12 +117,12 @@ export function Institutions({ data }: { data: MoneyData }) {
       accounts: d.accounts.map((a) => (a.institutionId === editingId ? { ...a, institutionId: "" } : a)),
       bills: d.bills.map((b) => (b.institutionId === editingId ? { ...b, institutionId: "" } : b)),
     }));
-    setDraft(blankDraft());
+    setDraft(blankDraft(defaultScope));
     setEditingId(null);
   }
 
   function addStarter(starter: Draft) {
-    setMoneyData((d) => ({ ...d, institutions: [...d.institutions, { id: newId(), ...starter }] }));
+    setMoneyData((d) => ({ ...d, institutions: [...d.institutions, { id: newId(), ...starter, scope: defaultScope }] }));
   }
 
   const starters = STARTERS.filter(
@@ -159,7 +162,8 @@ export function Institutions({ data }: { data: MoneyData }) {
           <Field label="Account # (last 4 only)">
             <input className={inputClass} inputMode="numeric" maxLength={4} value={draft.memberNumber} onChange={(e) => set("memberNumber", e.target.value)} placeholder="1234" />
           </Field>
-          <div className="sm:col-span-3">
+          <ScopeField value={draft.scope ?? "personal"} onChange={(v) => set("scope", v)} />
+          <div className="sm:col-span-2">
             <Field label="Notes">
               <input className={inputClass} value={draft.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Branch, contact person, what this is for" />
             </Field>
@@ -170,7 +174,7 @@ export function Institutions({ data }: { data: MoneyData }) {
             </button>
             {editingId && (
               <>
-                <button type="button" className={ghostButtonClass} onClick={() => { setEditingId(null); setDraft(blankDraft()); }}>
+                <button type="button" className={ghostButtonClass} onClick={() => { setEditingId(null); setDraft(blankDraft(defaultScope)); }}>
                   Cancel
                 </button>
                 <button type="button" className="px-2 text-sm text-rose-600" onClick={remove}>
@@ -233,7 +237,10 @@ export function Institutions({ data }: { data: MoneyData }) {
                 <section key={inst.id} className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="font-medium">{inst.name}</h3>
+                      <h3 className="font-medium">
+                        {inst.name}
+                        <ScopeBadge item={inst} />
+                      </h3>
                       <p className="text-xs text-zinc-500">
                         {inst.type}
                         {inst.memberNumber && ` · ending ${inst.memberNumber}`}
