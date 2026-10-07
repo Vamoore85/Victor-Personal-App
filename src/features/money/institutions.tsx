@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { newId, setMoneyData } from "./store";
 import { INSTITUTION_TYPES, type Institution, type MoneyData } from "./types";
 import { accountBalance, accountTypeLabel, isLiability, money, normalizeUrl, shortDate } from "./calc";
+import { InstitutionLogins, VaultBar } from "./vault-ui";
 import { Card, Empty, Field, buttonClass, ghostButtonClass, inputClass } from "./ui";
 
 type Draft = Omit<Institution, "id">;
@@ -132,6 +133,8 @@ export function Institutions({ data }: { data: MoneyData }) {
 
   return (
     <div className="flex flex-col gap-6">
+      <VaultBar />
+
       <Card title={editingId ? "Edit institution" : "Add an institution"}>
         <form onSubmit={save} className="grid gap-3 sm:grid-cols-3 sm:items-end">
           <Field label="Name">
@@ -178,7 +181,8 @@ export function Institutions({ data }: { data: MoneyData }) {
           </div>
         </form>
         <p className="mt-3 text-xs text-zinc-500">
-          Don&apos;t store passwords or full account numbers here; keep those in a password manager.
+          These details are not encrypted. Put usernames, passwords, PINs and full account numbers in a login on the
+          institution&apos;s card, where the vault encrypts them.
         </p>
       </Card>
 
@@ -279,6 +283,8 @@ export function Institutions({ data }: { data: MoneyData }) {
                       ))}
                     </ul>
                   )}
+
+                  <InstitutionLogins institution={inst} />
                 </section>
               );
             })}

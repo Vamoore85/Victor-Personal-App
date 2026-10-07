@@ -2,11 +2,13 @@
 
 import { useRef, useState } from "react";
 import { importMoneyData, useMoneyData } from "./store";
+import { exportEncryptedVault, importEncryptedVault } from "./vault";
 import { DEFAULT_CATEGORIES } from "./types";
 import { categoriesInUse, today } from "./calc";
 import { Accounts, Budgets, Overview, Transactions } from "./sections";
 import { Bills } from "./bills";
 import { Institutions } from "./institutions";
+import { VaultAutoLock } from "./vault-ui";
 import { ghostButtonClass } from "./ui";
 
 const TABS = [
@@ -30,7 +32,9 @@ export function FinancialCenter() {
   const categories = categoriesInUse(data, DEFAULT_CATEGORIES);
 
   function exportData() {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    // The vault goes into the backup still encrypted; it needs the master password to open.
+    const backup = { ...data, vault: exportEncryptedVault() };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -42,7 +46,10 @@ export function FinancialCenter() {
   async function importFile(file: File) {
     if (!confirm("Replace everything in the Financial Center with this backup?")) return;
     try {
-      importMoneyData(await file.text());
+      const text = await file.text();
+      importMoneyData(text);
+      const vault = (JSON.parse(text) as { vault?: unknown }).vault;
+      if (vault) importEncryptedVault(vault);
     } catch {
       alert("That file isn't a valid Financial Center backup.");
     }
@@ -50,6 +57,7 @@ export function FinancialCenter() {
 
   return (
     <div className="flex flex-col gap-6">
+      <VaultAutoLock />
       <nav className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex max-w-full gap-1 overflow-x-auto rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900">
           {TABS.map((t) => (
