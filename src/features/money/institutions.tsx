@@ -8,6 +8,46 @@ import { Card, Empty, Field, buttonClass, ghostButtonClass, inputClass } from ".
 
 type Draft = Omit<Institution, "id">;
 
+// One-tap starters for places most people deal with. Details can be edited after adding.
+const STARTERS: Draft[] = [
+  {
+    name: "IRS",
+    type: "Government",
+    website: "https://www.irs.gov",
+    loginUrl: "https://www.irs.gov/your-account",
+    phone: "1-800-829-1040",
+    memberNumber: "",
+    notes: "Federal taxes. Payments: irs.gov/payments",
+  },
+  {
+    name: "Comptroller of Maryland",
+    type: "Government",
+    website: "https://www.marylandtaxes.gov",
+    loginUrl: "",
+    phone: "1-800-638-2937",
+    memberNumber: "",
+    notes: "Maryland state taxes",
+  },
+  {
+    name: "Maryland MVA",
+    type: "Government",
+    website: "https://mva.maryland.gov",
+    loginUrl: "",
+    phone: "",
+    memberNumber: "",
+    notes: "License, registration, tags",
+  },
+  {
+    name: "Maryland Child Support",
+    type: "Government",
+    website: "https://dhs.maryland.gov/child-support-services/",
+    loginUrl: "",
+    phone: "",
+    memberNumber: "",
+    notes: "Child support case and payments",
+  },
+];
+
 const blankDraft = (): Draft => ({
   name: "",
   type: "Bank",
@@ -77,6 +117,14 @@ export function Institutions({ data }: { data: MoneyData }) {
     setEditingId(null);
   }
 
+  function addStarter(starter: Draft) {
+    setMoneyData((d) => ({ ...d, institutions: [...d.institutions, { id: newId(), ...starter }] }));
+  }
+
+  const starters = STARTERS.filter(
+    (st) => !data.institutions.some((i) => i.name.toLowerCase() === st.name.toLowerCase()),
+  );
+
   const typesInUse = ["All", ...INSTITUTION_TYPES.filter((t) => data.institutions.some((i) => i.type === t))];
   const shown = data.institutions
     .filter((i) => filter === "All" || i.type === filter)
@@ -133,6 +181,19 @@ export function Institutions({ data }: { data: MoneyData }) {
           Don&apos;t store passwords or full account numbers here; keep those in a password manager.
         </p>
       </Card>
+
+      {starters.length > 0 && (
+        <Card title="Quick add">
+          <div className="flex flex-wrap gap-2">
+            {starters.map((st) => (
+              <button key={st.name} className={ghostButtonClass} onClick={() => addStarter(st)}>
+                + {st.name}
+              </button>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-zinc-500">Adds the agency with its website and phone; press Edit on its card to add your case or account details.</p>
+        </Card>
+      )}
 
       {data.institutions.length === 0 ? (
         <Card>
