@@ -17,7 +17,7 @@ const TABS = [
   { id: "transactions", label: "Transactions" },
   { id: "bills", label: "Bills" },
   { id: "budgets", label: "Budgets" },
-  { id: "institutions", label: "Institutions" },
+  { id: "institutions", label: "Maverick Vault" },
 ];
 
 export function FinancialCenter() {

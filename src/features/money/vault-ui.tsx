@@ -82,7 +82,7 @@ export function VaultBar() {
 
   if (vault.status === "none") {
     return (
-      <Card title="Set up your password vault">
+      <Card title="Set up Maverick Vault">
         <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
           Choose a master password. Your logins are encrypted with it on this device, and only the encrypted version is
           saved or exported. <strong>There is no way to recover it</strong>, so pick one you will remember.
@@ -103,7 +103,7 @@ export function VaultBar() {
 
   if (vault.status === "locked") {
     return (
-      <Card title="🔒 Password vault is locked">
+      <Card title="🔒 Maverick Vault is locked">
         <form onSubmit={unlock} className="flex flex-wrap items-end gap-3">
           <div className="min-w-56 flex-1">
             <Field label="Master password">
@@ -121,7 +121,7 @@ export function VaultBar() {
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm">
-          🔓 <span className="font-medium">Vault unlocked.</span>{" "}
+          🔓 <span className="font-medium">Maverick Vault unlocked.</span>{" "}
           <span className="text-zinc-500">
             {vault.entries.length} login{vault.entries.length === 1 ? "" : "s"} · locks after {AUTO_LOCK_MINUTES} minutes idle
           </span>

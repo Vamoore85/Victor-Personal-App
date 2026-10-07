@@ -13,7 +13,7 @@ export default function MoneyPage() {
         </Link>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight">Financial Center</h1>
         <p className="mt-1 text-zinc-600 dark:text-zinc-400">
-          Accounts, bills, spending, budgets and institutions in one place. Stored only in this browser.
+          Accounts, bills, spending, budgets and Maverick Vault in one place. Stored only in this browser.
         </p>
       </header>
       <FinancialCenter />
