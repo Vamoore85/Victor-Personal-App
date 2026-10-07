@@ -66,7 +66,7 @@ export function FinancialCenter() {
               onClick={() => setTab(t.id)}
               className={`shrink-0 rounded-md px-3 py-1.5 text-sm ${
                 tab === t.id
-                  ? "bg-white font-medium shadow-sm dark:bg-zinc-800"
+                  ? "bg-white font-medium text-brand shadow-sm dark:bg-zinc-800"
                   : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
               }`}
             >

@@ -216,7 +216,7 @@ export function Institutions({ data }: { data: MoneyData }) {
                   onClick={() => setFilter(t)}
                   className={`rounded-full border px-3 py-1 text-xs ${
                     filter === t
-                      ? "border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900"
+                      ? "border-brand bg-brand text-on-brand"
                       : "border-zinc-300 dark:border-zinc-700"
                   }`}
                 >
