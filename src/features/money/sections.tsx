@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { newId, setMoneyData } from "./store";
 import { ACCOUNT_TYPES, type AccountType, type MoneyData, type Transaction } from "./types";
 import { accountBalance, accountTypeLabel, currentMonth, isLiability, money, monthLabel, monthTotals, today } from "./calc";
+import { UpcomingBills } from "./bills";
 import { Bar, Card, Empty, Field, Stat, buttonClass, ghostButtonClass, inputClass } from "./ui";
 
 function parseAmount(s: string) {
@@ -27,16 +28,21 @@ export function Overview({ data, goTo }: { data: MoneyData; goTo: (tab: string) 
   const spending = [...totals.byCategory.entries()].sort((a, b) => b[1] - a[1]);
   const topSpend = spending[0]?.[1] ?? 0;
 
-  if (data.accounts.length === 0) {
+  if (data.accounts.length === 0 && data.bills.length === 0) {
     return (
       <Card title="Welcome to your Financial Center">
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           Start by adding your accounts (checking, savings, credit cards, loans) with their current balances. Then log
           transactions and set monthly budgets. Everything stays in this browser.
         </p>
-        <button className={`${buttonClass} mt-4`} onClick={() => goTo("accounts")}>
-          Add your first account
-        </button>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button className={buttonClass} onClick={() => goTo("accounts")}>
+            Add your first account
+          </button>
+          <button className={ghostButtonClass} onClick={() => goTo("bills")}>
+            Start with your bills
+          </button>
+        </div>
       </Card>
     );
   }
@@ -64,6 +70,13 @@ export function Overview({ data, goTo }: { data: MoneyData; goTo: (tab: string) 
             <p className="text-lg font-medium tabular-nums">{money(totals.net)}</p>
           </div>
         </div>
+      </Card>
+
+      <Card
+        title="Bills due in the next 2 weeks"
+        action={<button className={ghostButtonClass} onClick={() => goTo("bills")}>All bills</button>}
+      >
+        <UpcomingBills data={data} days={14} />
       </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -236,7 +249,7 @@ export function Transactions({ data, categories }: { data: MoneyData; categories
     setAmount("");
   }
 
-  if (data.accounts.length === 0) {
+  if (data.accounts.length === 0 && data.bills.length === 0) {
     return (
       <Card>
         <Empty>Add an account first, then you can log transactions against it.</Empty>
@@ -290,7 +303,9 @@ export function Transactions({ data, categories }: { data: MoneyData; categories
       <Card
         title="Transactions"
         action={
-          <input type="month" className={`${inputClass} w-auto`} value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} />
+          <div className="w-44 shrink-0">
+            <input type="month" className={inputClass} value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} />
+          </div>
         }
       >
         {filterMonth && (

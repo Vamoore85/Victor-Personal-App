@@ -5,12 +5,14 @@ import { importMoneyData, useMoneyData } from "./store";
 import { DEFAULT_CATEGORIES } from "./types";
 import { categoriesInUse, today } from "./calc";
 import { Accounts, Budgets, Overview, Transactions } from "./sections";
+import { Bills } from "./bills";
 import { ghostButtonClass } from "./ui";
 
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "accounts", label: "Accounts" },
   { id: "transactions", label: "Transactions" },
+  { id: "bills", label: "Bills" },
   { id: "budgets", label: "Budgets" },
 ];
 
@@ -82,6 +84,7 @@ export function FinancialCenter() {
       {tab === "overview" && <Overview data={data} goTo={setTab} />}
       {tab === "accounts" && <Accounts data={data} />}
       {tab === "transactions" && <Transactions data={data} categories={categories} />}
+      {tab === "bills" && <Bills data={data} categories={categories} />}
       {tab === "budgets" && <Budgets data={data} categories={categories} />}
     </div>
   );
