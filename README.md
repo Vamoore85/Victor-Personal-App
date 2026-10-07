@@ -1,4 +1,4 @@
-# Maverick
+# Maverick Personal
 
 Sandbox for a master personal app that manages everything in one place.
 
