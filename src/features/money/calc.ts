@@ -103,33 +103,45 @@ function addMonthsClamped(date: Date, months: number, day: number) {
  * shorter months, then back on the 31st). Returns null for one-time bills.
  */
 export function nextDueAfter(bill: Bill, from: string): string | null {
+  return stepDue(bill, from, 1);
+}
+
+function stepDue(bill: Bill, from: string, dir: 1 | -1): string | null {
   const d = parseDate(from);
   const day = bill.dueDay || d.getDate();
   switch (bill.frequency) {
     case "weekly":
-      d.setDate(d.getDate() + 7);
+      d.setDate(d.getDate() + 7 * dir);
       return formatYmd(d);
     case "biweekly":
-      d.setDate(d.getDate() + 14);
+      d.setDate(d.getDate() + 14 * dir);
       return formatYmd(d);
     case "monthly":
-      return formatYmd(addMonthsClamped(d, 1, day));
+      return formatYmd(addMonthsClamped(d, 1 * dir, day));
     case "quarterly":
-      return formatYmd(addMonthsClamped(d, 3, day));
+      return formatYmd(addMonthsClamped(d, 3 * dir, day));
     case "yearly":
-      return formatYmd(addMonthsClamped(d, 12, day));
+      return formatYmd(addMonthsClamped(d, 12 * dir, day));
     case "once":
       return null;
   }
 }
 
-/** All dates a bill comes out within [start, end], inclusive. */
+/**
+ * All dates a bill comes out within [start, end], inclusive. Dates before the
+ * bill's next due date have already gone by, so they are flagged as paid.
+ */
 export function billDatesBetween(bill: Bill, start: string, end: string) {
-  const dates: string[] = [];
+  const dates: { date: string; paid: boolean }[] = [];
   let d: string | null = bill.nextDue;
   while (d && d <= end && dates.length < 60) {
-    if (d >= start) dates.push(d);
-    d = nextDueAfter(bill, d);
+    if (d >= start) dates.push({ date: d, paid: false });
+    d = stepDue(bill, d, 1);
+  }
+  d = stepDue(bill, bill.nextDue, -1);
+  while (d && d >= start && dates.length < 120) {
+    if (d <= end) dates.push({ date: d, paid: true });
+    d = stepDue(bill, d, -1);
   }
   return dates;
 }

@@ -51,6 +51,23 @@ export function markBillPaid(bill: Bill) {
   });
 }
 
+/** Accepts "duke-energy.com" as well as full URLs. */
+function normalizeUrl(raw: string) {
+  const s = raw.trim();
+  if (!s) return "";
+  return /^https?:\/\//i.test(s) ? s : `https://${s}`;
+}
+
+function BillName({ bill }: { bill: Bill }) {
+  if (!bill.url) return <>{bill.name}</>;
+  return (
+    <a href={bill.url} target="_blank" rel="noopener noreferrer" className="underline decoration-zinc-300 underline-offset-2 hover:decoration-zinc-900 dark:decoration-zinc-600 dark:hover:decoration-zinc-100">
+      {bill.name}
+      <span className="ml-1 text-xs text-zinc-400">↗</span>
+    </a>
+  );
+}
+
 function dueTone(ymd: string) {
   const days = daysUntil(ymd);
   if (days < 0) return "text-rose-600 dark:text-rose-400";
@@ -74,7 +91,7 @@ function BillRows({ items, onEdit }: { items: Bill[]; onEdit?: (bill: Bill) => v
         <li key={b.id} className="flex items-center justify-between gap-3 py-2.5">
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">
-              {b.name}
+              <BillName bill={b} />
               {b.autopay && (
                 <span className="ml-2 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-500 dark:bg-zinc-800">
                   Autopay
@@ -110,6 +127,7 @@ type Draft = {
   category: string;
   accountId: string;
   autopay: boolean;
+  url: string;
 };
 
 const blankDraft = (): Draft => ({
@@ -120,6 +138,7 @@ const blankDraft = (): Draft => ({
   category: "Utilities",
   accountId: "",
   autopay: false,
+  url: "",
 });
 
 export function Bills({ data, categories }: { data: MoneyData; categories: string[] }) {
@@ -141,6 +160,7 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
       category: draft.category.trim() || "Other",
       accountId: draft.accountId,
       autopay: draft.autopay,
+      url: normalizeUrl(draft.url),
     };
     setMoneyData((d) => ({
       ...d,
@@ -162,6 +182,7 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
       category: b.category,
       accountId: b.accountId,
       autopay: b.autopay,
+      url: b.url ?? "",
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -182,7 +203,7 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
   // Every date each bill comes out in the chosen month, earliest first.
   const { start, end } = monthBounds(month);
   const calendar = data.bills
-    .flatMap((b) => billDatesBetween(b, start, end).map((date) => ({ date, bill: b })))
+    .flatMap((b) => billDatesBetween(b, start, end).map(({ date, paid }) => ({ date, paid, bill: b })))
     .sort((a, b) => a.date.localeCompare(b.date) || a.bill.name.localeCompare(b.bill.name));
   const monthTotal = calendar.reduce((s, x) => s + x.bill.amount, 0);
   const accountNames = new Map(data.accounts.map((a) => [a.id, a.name]));
@@ -229,6 +250,11 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
               ))}
             </select>
           </Field>
+          <div className="sm:col-span-3">
+            <Field label="Where to pay it (link)">
+              <input className={inputClass} inputMode="url" value={draft.url} onChange={(e) => set("url", e.target.value)} placeholder="https://www.duke-energy.com/pay" />
+            </Field>
+          </div>
           <label className="flex items-center gap-2 text-sm sm:col-span-3">
             <input type="checkbox" checked={draft.autopay} onChange={(e) => set("autopay", e.target.checked)} />
             Comes out automatically (autopay)
@@ -268,16 +294,19 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
           <>
             <p className="mb-3 text-sm text-zinc-500">{money(monthTotal)} total across {calendar.length} payments</p>
             <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
-              {calendar.map(({ date, bill }) => (
-                <li key={`${bill.id}-${date}`} className="flex items-center justify-between gap-3 py-2">
+              {calendar.map(({ date, paid, bill }) => (
+                <li key={`${bill.id}-${date}`} className={`flex items-center justify-between gap-3 py-2 ${paid ? "opacity-50" : ""}`}>
                   <div className="flex min-w-0 items-center gap-3">
                     <span className="w-24 shrink-0 text-sm tabular-nums text-zinc-500">{shortDate(date)}</span>
                     <span className="truncate text-sm">
-                      {bill.name}
+                      <BillName bill={bill} />
                       {bill.accountId && <span className="text-zinc-400"> · {accountNames.get(bill.accountId)}</span>}
                     </span>
                   </div>
-                  <span className="shrink-0 text-sm tabular-nums">{money(bill.amount)}</span>
+                  <span className="shrink-0 text-sm tabular-nums">
+                    {paid && <span className="mr-2 text-xs text-emerald-600 dark:text-emerald-400">Paid</span>}
+                    {money(bill.amount)}
+                  </span>
                 </li>
               ))}
             </ul>

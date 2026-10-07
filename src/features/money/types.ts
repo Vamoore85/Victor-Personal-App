@@ -74,6 +74,7 @@ export type Bill = {
   dueDay: number; // day of month it normally comes out, kept so the 31st survives short months
   accountId: string; // "" when not tied to an account
   autopay: boolean;
+  url?: string; // where the bill is paid (the biller's website or payment page)
 };
 
 export type MoneyData = {
