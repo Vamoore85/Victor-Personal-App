@@ -89,14 +89,15 @@ export const INSTITUTION_TYPES = [
   "Utility",
   "Phone & internet",
   "Housing",
-  "Medical",
+  "Health care",
+  "Pharmacy",
   "Government",
   "Subscription",
   "Other",
 ];
 
-// A company or organization you have a relationship with. Login details are
-// deliberately not stored here: keep passwords in a password manager.
+// A company or organization you have a relationship with. These fields are
+// stored unencrypted; logins and passwords live in the encrypted vault (vault.ts).
 export type Institution = {
   id: string;
   name: string;
