@@ -12,16 +12,20 @@ import { Pool } from "pg";
  * which keeps the last few hundred versions as backups.
  */
 
-export const dbConfigured = () => Boolean(process.env.DATABASE_URL);
+// The variable was first saved in Vercel as "DATABSE_URL" (a sensitive
+// variable can't be renamed there), so both spellings are accepted.
+const databaseUrl = () => process.env.DATABASE_URL || process.env.DATABSE_URL || "";
+
+export const dbConfigured = () => Boolean(databaseUrl());
 
 let pool: Pool | null = null;
 let ready: Promise<void> | null = null;
 
 function getPool() {
   pool ??= new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: databaseUrl(),
     // Supabase's pooler presents its own certificate chain; a local test database has no TLS.
-    ssl: /@(localhost|127\.0\.0\.1)[:/]/.test(process.env.DATABASE_URL ?? "") ? false : { rejectUnauthorized: false },
+    ssl: /@(localhost|127\.0\.0\.1)[:/]/.test(databaseUrl()) ? false : { rejectUnauthorized: false },
     max: 3,
   });
   return pool;
