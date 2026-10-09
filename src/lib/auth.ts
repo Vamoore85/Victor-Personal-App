@@ -42,12 +42,22 @@ function levelOf(cookie: string | undefined): Level | null {
 
 /** Signed in with password and code. */
 export function validSession(cookie: string | undefined) {
-  return levelOf(cookie) === "full";
+  const level = levelOf(cookie);
+  return level === "full" || (level === "password" && !codeRequired());
 }
 
 /** Allowed on the 2-step setup page: any session, including a password-only one. */
 export function setupSession(cookie: string | undefined) {
   return levelOf(cookie) !== null;
+}
+
+/**
+ * The 6-digit code is off unless MFA_REQUIRED=1 is set in Vercel; until then
+ * the password alone signs in fully. Plaid's application says MFA is on, so
+ * set it before Plaid reviews the app or before connecting real banks.
+ */
+export function codeRequired() {
+  return process.env.MFA_REQUIRED === "1";
 }
 
 /**

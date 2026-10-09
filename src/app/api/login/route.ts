@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { SESSION_COOKIE, cookieOptions, correctCode, correctPassword, passwordSet, sessionToken, setupOpen } from "@/lib/auth";
+import { SESSION_COOKIE, codeRequired, cookieOptions, correctCode, correctPassword, passwordSet, sessionToken, setupOpen } from "@/lib/auth";
 
 const slow = () => new Promise((r) => setTimeout(r, 800)); // slow down guessing
 
@@ -10,6 +10,10 @@ export async function POST(req: Request) {
   if (!correctPassword(password)) {
     await slow();
     return Response.json({ error: "That password isn't right." }, { status: 401 });
+  }
+  if (!codeRequired()) {
+    (await cookies()).set(SESSION_COOKIE, sessionToken("full"), cookieOptions());
+    return Response.json({ ok: true });
   }
   if (code === undefined || code === "") {
     if (!setupOpen()) return Response.json({ needCode: true });
