@@ -63,7 +63,7 @@ export default function TrustPage() {
             <li>All traffic between the browser, the app&apos;s servers and Plaid is encrypted in transit with HTTPS (TLS).</li>
             <li>
               Plaid API keys are used only by server code. They are kept either as encrypted environment variables on the hosting provider (Vercel), or on the owner&apos;s device in a form sealed with AES-256-GCM that only the server can open.
-              They are never sent to the browser.
+              The browser never holds them in readable form.
             </li>
             <li>
               The access token for each connected account is encrypted with AES-256-GCM on the server before it is stored, and can only be
