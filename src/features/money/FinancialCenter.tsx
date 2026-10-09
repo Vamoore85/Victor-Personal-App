@@ -85,7 +85,7 @@ export function FinancialCenter() {
           {([
             ["all", "All"],
             ["personal", "Personal"],
-            ["business", "Business"],
+            ["business", "Maverick"],
           ] as const).map(([v, label]) => (
             <button
               key={v}

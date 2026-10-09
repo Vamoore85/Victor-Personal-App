@@ -8,7 +8,7 @@ export type ScopeView = "all" | Scope;
 
 export const SCOPES: { value: Scope; label: string }[] = [
   { value: "personal", label: "Personal" },
-  { value: "business", label: "Business" },
+  { value: "business", label: "Maverick" },
 ];
 
 /** The Personal / Business / All switch at the top of the Financial Center. */
@@ -61,7 +61,7 @@ export function ScopeBadge({ item }: { item: { scope?: Scope } }) {
   if (view !== "all" || scopeOf(item) !== "business") return null;
   return (
     <span className="ml-2 rounded bg-ember/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-brand">
-      Business
+      Maverick
     </span>
   );
 }
