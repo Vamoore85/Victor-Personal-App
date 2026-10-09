@@ -49,6 +49,11 @@ export default function Home() {
           );
         })}
       </section>
+      <footer className="mt-12 text-sm text-zinc-500">
+        <Link href="/trust" className="hover:text-brand">
+          Privacy &amp; Security
+        </Link>
+      </footer>
     </main>
   );
 }

@@ -3,6 +3,9 @@
 export const APP_NAME = "Maverick Personal";
 export const APP_TAGLINE = "One place to run my whole life.";
 
+// Shown on the public Privacy & Security page (/trust). Empty hides the Contact section.
+export const TRUST_CONTACT_EMAIL = "";
+
 // Life areas shown on the home dashboard. Each will grow into its own module;
 // an area with an href is live and links to its page.
 type LifeArea = { slug: string; label: string; blurb: string; href?: string };
