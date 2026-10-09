@@ -2,6 +2,8 @@
 
 Sandbox for a master personal app that manages everything in one place.
 
+Live at https://maverick-personal.vercel.app (Vercel deploys every push to `main`).
+
 ## Run it
 
 ```bash
