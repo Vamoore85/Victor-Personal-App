@@ -22,6 +22,10 @@ export function LoginForm() {
       body: JSON.stringify(needCode ? { password, code } : { password }),
     }).catch(() => null);
     const json = res ? await res.json().catch(() => ({})) : {};
+    if (res?.ok && json.setup) {
+      window.location.href = "/security";
+      return;
+    }
     if (res?.ok && json.needCode) {
       setNeedCode(true);
       setBusy(false);

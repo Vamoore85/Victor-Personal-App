@@ -47,7 +47,15 @@ export function validSession(cookie: string | undefined) {
 
 /** Allowed on the 2-step setup page: any session, including a password-only one. */
 export function setupSession(cookie: string | undefined) {
-  return levelOf(cookie) !== null || (passwordSet() && process.env.MFA_SETUP_OPEN === "1");
+  return levelOf(cookie) !== null;
+}
+
+/**
+ * Recovery for a lost phone: with MFA_SETUP_OPEN=1 in Vercel, the password
+ * alone signs in to the setup page so a new authenticator can be scanned.
+ */
+export function setupOpen() {
+  return process.env.MFA_SETUP_OPEN === "1";
 }
 
 export function correctPassword(attempt: unknown) {

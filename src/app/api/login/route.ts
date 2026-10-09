@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { SESSION_COOKIE, cookieOptions, correctCode, correctPassword, passwordSet, sessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, cookieOptions, correctCode, correctPassword, passwordSet, sessionToken, setupOpen } from "@/lib/auth";
 
 const slow = () => new Promise((r) => setTimeout(r, 800)); // slow down guessing
 
@@ -11,7 +11,11 @@ export async function POST(req: Request) {
     await slow();
     return Response.json({ error: "That password isn't right." }, { status: 401 });
   }
-  if (code === undefined || code === "") return Response.json({ needCode: true });
+  if (code === undefined || code === "") {
+    if (!setupOpen()) return Response.json({ needCode: true });
+    (await cookies()).set(SESSION_COOKIE, sessionToken("password"), cookieOptions());
+    return Response.json({ setup: true });
+  }
   if (!correctCode(code)) {
     await slow();
     return Response.json({ error: "That code isn't right. Use the newest code in your authenticator app." }, { status: 401 });
