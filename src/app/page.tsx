@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { APP_NAME, APP_TAGLINE, LIFE_AREAS } from "@/config/app";
+import { SignOut } from "@/components/SignOut";
 
 export default function Home() {
   return (
@@ -49,10 +50,11 @@ export default function Home() {
           );
         })}
       </section>
-      <footer className="mt-12 text-sm text-zinc-500">
+      <footer className="mt-12 flex gap-6 text-sm text-zinc-500">
         <Link href="/trust" className="hover:text-brand">
           Privacy &amp; Security
         </Link>
+        <SignOut />
       </footer>
     </main>
   );

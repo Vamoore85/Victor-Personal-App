@@ -73,7 +73,7 @@ export default function TrustPage() {
               Financial data is kept in the owner&apos;s own browser storage rather than in a shared database, so there is no central store of
               financial records to breach.
             </li>
-            <li>Access to the app is restricted to the owner&apos;s signed-in account with the hosting provider.</li>
+            <li>Every page and server function of the app, other than this policy, requires the owner&apos;s password. Sessions are held in a secure, HTTP-only cookie.</li>
             <li>Saved logins in the app&apos;s vault are encrypted on the device with AES-256, using a key derived from a master password.</li>
           </ul>
         </Section>

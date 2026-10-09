@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { SESSION_COOKIE, validSession } from "@/lib/auth";
 
 // Server-side Plaid helpers. Plaid's keys live in Vercel environment
 // variables and never reach the browser:
@@ -72,6 +73,16 @@ export function unseal(sealed: unknown) {
   }
 }
 
+/** Checked here as well as in the proxy, so a matcher change can't open these routes. */
+export function signedIn(req: Request) {
+  const cookie = req.headers
+    .get("cookie")
+    ?.split(/;\s*/)
+    .find((c) => c.startsWith(`${SESSION_COOKIE}=`))
+    ?.slice(SESSION_COOKIE.length + 1);
+  return validSession(cookie);
+}
+
 /** Only accept calls made from this site's own pages. */
 export function sameOrigin(req: Request) {
   const origin = req.headers.get("origin");
@@ -81,6 +92,7 @@ export function sameOrigin(req: Request) {
 export function handle(fn: (body: Record<string, unknown>) => Promise<unknown>) {
   return async (req: Request) => {
     if (!sameOrigin(req)) return Response.json({ error: "Forbidden" }, { status: 403 });
+    if (!signedIn(req)) return Response.json({ error: "Sign in first." }, { status: 401 });
     try {
       const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
       return Response.json(await fn(body));
