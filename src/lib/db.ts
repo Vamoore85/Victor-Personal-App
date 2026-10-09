@@ -14,7 +14,7 @@ import { Pool } from "pg";
 
 // The variable was first saved in Vercel as "DATABSE_URL" (a sensitive
 // variable can't be renamed there), so both spellings are accepted.
-const databaseUrl = () => process.env.DATABASE_URL || process.env.DATABSE_URL || "";
+export const databaseUrl = () => process.env.DATABASE_URL || process.env.DATABSE_URL || "";
 
 export const dbConfigured = () => Boolean(databaseUrl());
 

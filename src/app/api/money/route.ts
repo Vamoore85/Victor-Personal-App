@@ -1,5 +1,5 @@
 import { connection } from "next/server";
-import { dbConfigured, readDoc, writeDoc } from "@/lib/db";
+import { databaseUrl, dbConfigured, readDoc, writeDoc } from "@/lib/db";
 import { sameOrigin, signedIn } from "@/lib/plaid-server";
 
 // Cloud copy of the Financial Center. The browser keeps a local copy too and
@@ -16,7 +16,33 @@ function guard(req: Request) {
 
 function failed(e: unknown) {
   console.error("money sync", e);
-  return Response.json({ error: "Couldn't reach the database." }, { status: 502 });
+  return Response.json({ error: diagnose(e) }, { status: 502 });
+}
+
+// A plain-English reason shown in the app, without any part of the
+// connection string or password.
+function diagnose(e: unknown) {
+  const err = e as { code?: string; message?: string };
+  const code = err?.code ?? "";
+  const msg = String(err?.message ?? "");
+  const url = databaseUrl();
+  let host = "";
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return "The database link in Vercel isn't a valid link. If the password has symbols like @ # / ? %, reset it to letters and numbers only and paste the link again.";
+  }
+  if (url.includes("[YOUR-PASSWORD]") || url.includes("YOUR-PASSWORD"))
+    return "The database link still says [YOUR-PASSWORD]. Replace that part with your database password, without the brackets.";
+  if (/^db\.[a-z0-9]+\.supabase\.co$/.test(host) && /ENOTFOUND|ENETUNREACH|EAI_AGAIN|EHOSTUNREACH/.test(code + msg))
+    return "The database link is Supabase's \"Direct connection\", which Vercel can't reach. Use the \"Transaction pooler\" link instead (it ends in pooler.supabase.com:6543).";
+  if (code === "28P01" || /password authentication failed/i.test(msg))
+    return "Supabase rejected the database password in the link. Paste the link again with the current database password.";
+  if (/Tenant or user not found/i.test(msg))
+    return "Supabase didn't recognize the user in the link. Copy the pooler link fresh from Supabase's Connect button.";
+  if (/ENOTFOUND|EAI_AGAIN/.test(code + msg)) return `The database address (${host}) couldn't be found. Copy the link fresh from Supabase.`;
+  if (/ETIMEDOUT|ECONNREFUSED|timeout/i.test(code + msg)) return `The database (${host}) didn't answer. Check that the Supabase project isn't paused.`;
+  return `Couldn't reach the database (${code || msg.slice(0, 80) || "unknown error"}).`;
 }
 
 export async function GET(req: Request) {

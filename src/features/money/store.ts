@@ -72,6 +72,7 @@ export function setMoneyData(update: (prev: MoneyData) => MoneyData) {
 
 export type CloudState = "off" | "loading" | "saving" | "saved" | "error";
 let cloud: CloudState = "loading";
+let cloudError = ""; // why the last save failed, from the server
 let rev = 0;
 let started = false;
 let loaded = false; // the database's copy has been read
@@ -110,7 +111,10 @@ async function startCloud() {
   try {
     const res = await fetch("/api/money", { cache: "no-store" });
     const json = await res.json();
-    if (!res.ok) throw new Error(json.error);
+    if (!res.ok) {
+      cloudError = json.error ?? "";
+      throw new Error(json.error);
+    }
     if (!json.configured) return setCloud("off");
     const local = read();
     loaded = true;
@@ -167,6 +171,7 @@ async function push() {
       save(normalize(json.data));
       setCloud("saved");
     } else if (!res.ok) {
+      cloudError = json.error ?? "";
       dirty = true;
       setCloud("error");
     } else {
@@ -181,6 +186,9 @@ async function push() {
     if (dirty && cloud !== "error") schedulePush();
   }
 }
+
+/** Why saving online failed, when the server said. */
+export const cloudErrorMessage = () => cloudError;
 
 /** Saving status for the header: off (no database), saving, saved or error. */
 export function useCloudState(): CloudState {

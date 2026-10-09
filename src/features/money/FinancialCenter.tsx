@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { ScopeContext, filterByScope, type ScopeView } from "./scope";
-import { importMoneyData, retryCloud, useCloudState, useMoneyData } from "./store";
+import { cloudErrorMessage, importMoneyData, retryCloud, useCloudState, useMoneyData } from "./store";
 import { exportEncryptedVault, importEncryptedVault } from "./vault";
 import { DEFAULT_CATEGORIES } from "./types";
 import { categoriesInUse, today } from "./calc";
@@ -169,9 +169,12 @@ function CloudBadge({ state }: { state: ReturnType<typeof useCloudState> }) {
   if (state === "off") return <span className="ml-auto text-xs text-zinc-400">Saved on this device only</span>;
   if (state === "error")
     return (
-      <button className="ml-auto text-xs text-rose-600 underline dark:text-rose-400" onClick={retryCloud}>
-        Couldn&apos;t save online. Try again
-      </button>
+      <span className="ml-auto max-w-md text-right text-xs text-rose-600 dark:text-rose-400">
+        <button className="underline" onClick={retryCloud}>
+          Couldn&apos;t save online. Try again
+        </button>
+        {cloudErrorMessage() && <span className="mt-1 block">{cloudErrorMessage()}</span>}
+      </span>
     );
   const label = state === "saving" ? "Saving…" : state === "loading" ? "Loading…" : "Saved online";
   return <span className="ml-auto text-xs text-zinc-500">{label}</span>;
