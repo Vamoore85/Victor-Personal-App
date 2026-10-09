@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { setMoneyData, newId } from "./store";
 import { useDefaultScope, ScopeBadge } from "./scope";
 import type { Account, AccountType, BankLink, MoneyData, Transaction } from "./types";
@@ -33,11 +33,29 @@ type SyncResult = { cursor: string; institution: string; accounts: SyncAccount[]
 
 const STALE_MS = 4 * 60 * 60 * 1000; // sync on open when the last sync is older than this
 
-async function api<T>(path: string, body?: unknown): Promise<T> {
+/*
+ * Plaid keys typed in below are kept in this browser only in sealed form
+ * (sealed by the server with the site password), next to which environment
+ * they're for. They're sent along with every bank call.
+ */
+const KEYS_STORAGE = "maverick-plaid-keys";
+type SavedKeys = { keys: string; env: string };
+
+function savedKeys(): SavedKeys | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(KEYS_STORAGE) || "null");
+    return v && typeof v.keys === "string" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+async function api<T>(path: string, body?: Record<string, unknown>): Promise<T> {
+  const payload = body === undefined ? undefined : { keys: savedKeys()?.keys, ...body };
   const res = await fetch(`/api/plaid/${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers: { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: payload === undefined ? undefined : JSON.stringify(payload),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(json.error || "Couldn't reach the bank connection service."), { code: json.code });
@@ -224,15 +242,34 @@ export function useAutoSync(data: MoneyData | null) {
 
 export function BankLinks({ data }: { data: MoneyData }) {
   const scope = useDefaultScope();
-  const [status, setStatus] = useState<{ configured: boolean; env: string } | null>(null);
+  const [server, setServer] = useState<{ fromSettings: boolean; env: string } | null>(null);
+  const [local, setLocal] = useState<SavedKeys | null>(null);
+  const [editingKeys, setEditingKeys] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    api<{ configured: boolean; env: string }>("status")
-      .then(setStatus)
-      .catch(() => setStatus({ configured: false, env: "sandbox" }));
+    setLocal(savedKeys());
+    api<{ fromSettings: boolean; env: string }>("status")
+      .then(setServer)
+      .catch(() => setServer({ fromSettings: false, env: "sandbox" }));
   }, []);
+
+  const status = server && {
+    configured: server.fromSettings || !!local,
+    env: server.fromSettings ? server.env : (local?.env ?? "sandbox"),
+  };
+
+  function keysSaved(k: SavedKeys | null) {
+    try {
+      if (k) localStorage.setItem(KEYS_STORAGE, JSON.stringify(k));
+      else localStorage.removeItem(KEYS_STORAGE);
+    } catch {
+      /* private window: the keys last until the tab closes */
+    }
+    setLocal(k);
+    setEditingKeys(false);
+  }
 
   async function connect() {
     setMessage("");
@@ -300,11 +337,23 @@ export function BankLinks({ data }: { data: MoneyData }) {
         </button>
       }
     >
-      {notReady && (
-        <p className="mb-3 rounded-lg bg-ember/10 px-3 py-2 text-sm text-brand">
-          Bank connections are almost ready. Plaid&apos;s keys still need to be added to this site&apos;s settings in Vercel.
+      {server && !server.fromSettings && (notReady || editingKeys ? (
+        <PlaidKeysForm onSaved={keysSaved} onCancel={local ? () => setEditingKeys(false) : undefined} />
+      ) : (
+        <p className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
+          <span>Plaid keys saved on this device ({status?.env === "production" ? "Live banks" : "Test mode"}).</span>
+          <button className="underline hover:text-brand" onClick={() => setEditingKeys(true)} disabled={busy !== null}>
+            Change keys
+          </button>
+          <button
+            className="underline hover:text-rose-600"
+            onClick={() => confirm("Remove the Plaid keys from this device? Connected banks stop syncing here until you add them again.") && keysSaved(null)}
+            disabled={busy !== null}
+          >
+            Remove keys
+          </button>
         </p>
-      )}
+      ))}
       {status?.configured && status.env === "sandbox" && (
         <p className="mb-3 text-xs text-zinc-500">
           Test mode: connect any bank in Plaid&apos;s window and sign in with username <span className="font-mono">user_good</span> and password{" "}
@@ -349,5 +398,71 @@ export function BankLinks({ data }: { data: MoneyData }) {
         </ul>
       )}
     </Card>
+  );
+}
+
+const inputClass =
+  "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-ember/50";
+
+/** Where you paste your Plaid keys. They're checked with Plaid, then saved sealed on this device. */
+function PlaidKeysForm({ onSaved, onCancel }: { onSaved: (k: SavedKeys) => void; onCancel?: () => void }) {
+  const [clientId, setClientId] = useState("");
+  const [secret, setSecret] = useState("");
+  const [env, setEnv] = useState("sandbox");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    setSaving(true);
+    try {
+      onSaved(await api<SavedKeys>("keys", { clientId, secret, env, keys: undefined }));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={save} className="mb-4 space-y-3 rounded-lg border border-ember/30 bg-ember/5 p-4">
+      <div>
+        <p className="font-medium">Add your Plaid keys</p>
+        <p className="text-xs text-zinc-500">
+          Find them in your Plaid dashboard under{" "}
+          <a className="underline hover:text-brand" href="https://dashboard.plaid.com/developers/keys" target="_blank" rel="noreferrer">
+            Developers, then Keys
+          </a>
+          . They&apos;re checked with Plaid and saved locked on this device; enter them once on each device you use.
+        </p>
+      </div>
+      <label className="block text-sm">
+        <span className="mb-1 block text-zinc-600 dark:text-zinc-400">client_id</span>
+        <input className={inputClass} value={clientId} onChange={(e) => setClientId(e.target.value)} autoComplete="off" spellCheck={false} required />
+      </label>
+      <label className="block text-sm">
+        <span className="mb-1 block text-zinc-600 dark:text-zinc-400">Secret</span>
+        <input className={inputClass} type="password" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" required />
+      </label>
+      <label className="block text-sm">
+        <span className="mb-1 block text-zinc-600 dark:text-zinc-400">Which keys are these?</span>
+        <select className={inputClass} value={env} onChange={(e) => setEnv(e.target.value)}>
+          <option value="sandbox">Sandbox (test banks, made-up data)</option>
+          <option value="production">Production (your real banks)</option>
+        </select>
+      </label>
+      {error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}
+      <div className="flex gap-2">
+        <button className={buttonClass} disabled={saving}>
+          {saving ? "Checking…" : "Save keys"}
+        </button>
+        {onCancel && (
+          <button type="button" className={ghostButtonClass} onClick={onCancel}>
+            Cancel
+          </button>
+        )}
+      </div>
+    </form>
   );
 }
