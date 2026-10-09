@@ -3,7 +3,8 @@
 import { useSyncExternalStore } from "react";
 import { EMPTY_DATA, type MoneyData } from "./types";
 
-// All money data lives in this browser's localStorage. Nothing is sent anywhere.
+// All money data lives in this browser's localStorage. The only thing sent
+// anywhere is bank syncing through this site's own Plaid server code (plaid.tsx).
 const STORAGE_KEY = "maverick.money.v1";
 
 let cache: MoneyData | null = null;
@@ -29,6 +30,7 @@ function normalize(value: unknown): MoneyData {
     budgets: Array.isArray(v.budgets) ? v.budgets : [],
     bills: Array.isArray(v.bills) ? v.bills : [],
     institutions: Array.isArray(v.institutions) ? v.institutions : [],
+    bankLinks: Array.isArray(v.bankLinks) ? v.bankLinks : [],
   };
 }
 

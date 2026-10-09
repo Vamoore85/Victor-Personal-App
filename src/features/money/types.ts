@@ -45,6 +45,9 @@ export type Account = {
   apr?: number; // percent, e.g. 24.99
   dueDay?: number; // day of month the payment is due
   minPayment?: number;
+  // Set when the account comes from a bank connected through Plaid. Its
+  // balance and transactions are then kept up to date by syncing.
+  plaid?: { linkId: string; accountId: string };
 };
 
 export type Transaction = {
@@ -58,6 +61,7 @@ export type Transaction = {
   // Set on both halves of a card payment or transfer between your own
   // accounts, so they don't count as income or spending.
   transferId?: string;
+  plaidId?: string; // Plaid's id for transactions that came from a connected bank
 };
 
 export type Budget = {
@@ -124,6 +128,19 @@ export type Institution = {
   scope?: Scope;
 };
 
+// A bank connected through Plaid. `link` is the connection key, sealed by the
+// server; it can't be used without the site's Plaid secret.
+export type BankLink = {
+  id: string;
+  itemId: string;
+  institution: string;
+  link: string;
+  cursor: string;
+  lastSync?: string; // ISO time of the last successful sync
+  error?: string; // why the last sync failed, cleared on success
+  scope?: Scope;
+};
+
 export type MoneyData = {
   version: 1;
   accounts: Account[];
@@ -131,6 +148,7 @@ export type MoneyData = {
   budgets: Budget[];
   bills: Bill[];
   institutions: Institution[];
+  bankLinks: BankLink[];
 };
 
 export const EMPTY_DATA: MoneyData = {
@@ -140,4 +158,5 @@ export const EMPTY_DATA: MoneyData = {
   budgets: [],
   bills: [],
   institutions: [],
+  bankLinks: [],
 };

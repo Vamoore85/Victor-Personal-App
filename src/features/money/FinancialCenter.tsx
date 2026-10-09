@@ -10,6 +10,7 @@ import { Accounts, Budgets, Overview, Transactions } from "./sections";
 import { Bills } from "./bills";
 import { Institutions } from "./institutions";
 import { VaultAutoLock } from "./vault-ui";
+import { BankLinks, useAutoSync } from "./plaid";
 import { ghostButtonClass } from "./ui";
 
 const TABS = [
@@ -33,6 +34,7 @@ export function FinancialCenter() {
     }
   });
   const fileRef = useRef<HTMLInputElement>(null);
+  useAutoSync(data);
 
   if (!data) {
     return <p className="text-sm text-zinc-500">Loading…</p>;
@@ -136,7 +138,12 @@ export function FinancialCenter() {
       </nav>
 
       {tab === "overview" && <Overview data={shown} goTo={setTab} />}
-      {tab === "accounts" && <Accounts data={shown} />}
+      {tab === "accounts" && (
+        <>
+          <BankLinks data={shown} />
+          <Accounts data={shown} />
+        </>
+      )}
       {tab === "transactions" && <Transactions data={shown} categories={categories} />}
       {tab === "bills" && <Bills data={shown} categories={categories} />}
       {tab === "budgets" && <Budgets data={shown} categories={categories} />}
