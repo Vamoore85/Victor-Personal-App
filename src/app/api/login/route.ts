@@ -1,19 +1,21 @@
 import { cookies } from "next/headers";
-import { SESSION_COOKIE, SESSION_DAYS, correctPassword, passwordSet, sessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, cookieOptions, correctCode, correctPassword, passwordSet, sessionToken } from "@/lib/auth";
 
+const slow = () => new Promise((r) => setTimeout(r, 800)); // slow down guessing
+
+// Step 1: the password. Step 2: the password again plus the authenticator code.
 export async function POST(req: Request) {
   if (!passwordSet()) return Response.json({ error: "No password has been set for this site yet." }, { status: 503 });
-  const { password } = (await req.json().catch(() => ({}))) as { password?: unknown };
+  const { password, code } = (await req.json().catch(() => ({}))) as { password?: unknown; code?: unknown };
   if (!correctPassword(password)) {
-    await new Promise((r) => setTimeout(r, 800)); // slow down guessing
+    await slow();
     return Response.json({ error: "That password isn't right." }, { status: 401 });
   }
-  (await cookies()).set(SESSION_COOKIE, sessionToken(), {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: SESSION_DAYS * 24 * 60 * 60,
-  });
+  if (code === undefined || code === "") return Response.json({ needCode: true });
+  if (!correctCode(code)) {
+    await slow();
+    return Response.json({ error: "That code isn't right. Use the newest code in your authenticator app." }, { status: 401 });
+  }
+  (await cookies()).set(SESSION_COOKIE, sessionToken("full"), cookieOptions());
   return Response.json({ ok: true });
 }
