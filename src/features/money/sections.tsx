@@ -2,8 +2,9 @@
 
 import { useState, type FormEvent } from "react";
 import { newId, setMoneyData } from "./store";
-import { ACCOUNT_TYPES, type Account, type AccountType, type MoneyData, type Transaction } from "./types";
-import { accountBalance, accountTypeLabel, currentMonth, daysUntil, dueLabel, isLiability, money, monthLabel, monthTotals, shortDate, today } from "./calc";
+import { ACCOUNT_TYPES, DEFAULT_CATEGORIES, type Account, type AccountType, type MoneyData, type Transaction } from "./types";
+import { BUSINESS_CATEGORY_NAMES, learnCategory } from "./books";
+import { accountBalance, accountTypeLabel, categoriesInUse, currentMonth, daysUntil, dueLabel, isLiability, money, monthLabel, monthTotals, shortDate, today } from "./calc";
 import { UpcomingBills } from "./bills";
 import { StatementImport } from "./import";
 import { ScopeBadge, ScopeField, filterByScope, scopeOf, useDefaultScope } from "./scope";
@@ -573,14 +574,26 @@ export function Transactions({ data, categories }: { data: MoneyData; categories
 
 function TransactionList({ data, items, deletable }: { data: MoneyData; items: Transaction[]; deletable?: boolean }) {
   const names = new Map(data.accounts.map((a) => [a.id, a.name]));
+  const scopes = new Map(data.accounts.map((a) => [a.id, scopeOf(a)]));
+  const personalCategories = categoriesInUse(filterByScope(data, "personal"), DEFAULT_CATEGORIES).filter((c) => c !== "Transfer");
   return (
     <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
       {items.map((t) => (
         <li key={t.id} className="flex items-center justify-between gap-3 py-2.5">
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">{t.description}</p>
-            <p className="text-xs text-zinc-500">
-              {t.date} · {t.category} · {names.get(t.accountId) ?? "Unknown account"}
+            <p className="flex flex-wrap items-center gap-x-1 text-xs text-zinc-500">
+              <span>{t.date} ·</span>
+              {deletable && !t.transferId ? (
+                <CategoryPicker
+                  value={t.category}
+                  options={scopes.get(t.accountId) === "business" ? BUSINESS_CATEGORY_NAMES : personalCategories}
+                  onChange={(category) => setMoneyData((d) => learnCategory(d, t, category, scopes.get(t.accountId) ?? "personal", newId))}
+                />
+              ) : (
+                <span>{t.category}</span>
+              )}
+              <span>· {names.get(t.accountId) ?? "Unknown account"}</span>
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-3">
@@ -606,6 +619,28 @@ function TransactionList({ data, items, deletable }: { data: MoneyData; items: T
         </li>
       ))}
     </ul>
+  );
+}
+
+/** Changing a category also teaches the app: others described the same way follow, now and on future syncs. */
+function CategoryPicker({ value, options, onChange }: { value: string; options: string[]; onChange: (c: string) => void }) {
+  const list = options.includes(value) ? options : [value, ...options];
+  const needsOne = !options.includes(value);
+  return (
+    <select
+      aria-label="Category"
+      className={`max-w-[12rem] cursor-pointer rounded border-0 bg-transparent py-0 pr-5 pl-0 text-xs hover:text-brand focus:ring-1 focus:ring-ember/50 ${
+        needsOne ? "text-amber-600 dark:text-amber-400" : ""
+      }`}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      {list.map((c) => (
+        <option key={c} value={c}>
+          {c}
+        </option>
+      ))}
+    </select>
   );
 }
 

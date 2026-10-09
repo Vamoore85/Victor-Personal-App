@@ -70,8 +70,9 @@ export default function TrustPage() {
               used through the app&apos;s own server.
             </li>
             <li>
-              Financial data is kept in the owner&apos;s own browser storage rather than in a shared database, so there is no central store of
-              financial records to breach.
+              Financial records are stored in a private database (Supabase, encrypted at rest with AES-256) that only the app&apos;s server can
+              reach. It is not open to the public internet API, holds only the owner&apos;s own data, and keeps dated backup versions. A working
+              copy is also kept on the owner&apos;s own device.
             </li>
             <li>Every page and server function of the app, other than this policy, requires the owner&apos;s password plus a one-time code from an authenticator app (multi-factor authentication). Sessions are held in a secure, HTTP-only cookie.</li>
             <li>Saved logins in the app&apos;s vault are encrypted on the device with AES-256, using a key derived from a master password.</li>
@@ -87,7 +88,8 @@ export default function TrustPage() {
         <Section title="Keeping and deleting data">
           <p>
             Data is kept only as long as the owner keeps it. Disconnecting an account in the app revokes the app&apos;s access to it at Plaid
-            and stops all further updates. Clearing the app&apos;s data in the browser deletes the stored financial records and connections.
+            and stops all further updates. Deleting an account or transaction in the app removes it from the database; older backup versions
+            are pruned automatically as new ones are saved.
           </p>
         </Section>
 

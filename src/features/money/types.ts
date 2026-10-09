@@ -62,6 +62,7 @@ export type Transaction = {
   // accounts, so they don't count as income or spending.
   transferId?: string;
   plaidId?: string; // Plaid's id for transactions that came from a connected bank
+  categoryLocked?: boolean; // you picked this category by hand; rules and syncs leave it alone
 };
 
 export type Budget = {
@@ -141,11 +142,21 @@ export type BankLink = {
   scope?: Scope;
 };
 
+// "Anything described like this goes in this category", learned when you
+// change a transaction's category, and applied to new bank transactions.
+export type CategoryRule = {
+  id: string;
+  match: string; // normalized description (see ruleKey in books.ts)
+  category: string;
+  scope?: Scope;
+};
+
 export type MoneyData = {
   version: 1;
   accounts: Account[];
   transactions: Transaction[];
   budgets: Budget[];
+  rules: CategoryRule[];
   bills: Bill[];
   institutions: Institution[];
   bankLinks: BankLink[];
@@ -156,6 +167,7 @@ export const EMPTY_DATA: MoneyData = {
   accounts: [],
   transactions: [],
   budgets: [],
+  rules: [],
   bills: [],
   institutions: [],
   bankLinks: [],

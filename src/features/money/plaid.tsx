@@ -6,6 +6,7 @@ import { useDefaultScope, ScopeBadge } from "./scope";
 import type { Account, AccountType, BankLink, MoneyData, Transaction } from "./types";
 import { isLiability } from "./calc";
 import { Card, Empty, buttonClass, ghostButtonClass } from "./ui";
+import { businessCategoryFor, ruleCategory } from "./books";
 
 /*
  * Connect banks and cards through Plaid. Plaid Link (Plaid's own sign-in
@@ -165,6 +166,7 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
   const existing = d.transactions.filter((t) => !t.plaidId || (!gone.has(t.plaidId) && !changed.has(t.plaidId)));
   const kept = new Map(d.transactions.filter((t) => t.plaidId && changed.has(t.plaidId)).map((t) => [t.plaidId!, t]));
   const incoming: Transaction[] = [];
+  const scope = link.scope ?? "personal";
   for (const pt of changed.values()) {
     const accountId = idFor.get(pt.accountId);
     if (!accountId || pt.pending) continue;
@@ -176,8 +178,12 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
       description: pt.name,
       amount: Math.abs(pt.amount),
       kind: income ? "income" : "expense",
-      // Keep a category you changed by hand.
-      category: prev?.category ?? categoryFor(pt.category, income),
+      // Keep a category already set; otherwise a learned rule, then Plaid's guess.
+      category:
+        prev?.category ??
+        ruleCategory(d.rules, pt.name, scope) ??
+        (scope === "business" ? businessCategoryFor(pt.category, income) : categoryFor(pt.category, income)),
+      categoryLocked: prev?.categoryLocked,
       accountId,
       transferId: prev?.transferId,
       plaidId: pt.id,

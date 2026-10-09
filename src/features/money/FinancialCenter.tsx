@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { ScopeContext, filterByScope, type ScopeView } from "./scope";
-import { importMoneyData, useMoneyData } from "./store";
+import { importMoneyData, retryCloud, useCloudState, useMoneyData } from "./store";
 import { exportEncryptedVault, importEncryptedVault } from "./vault";
 import { DEFAULT_CATEGORIES } from "./types";
 import { categoriesInUse, today } from "./calc";
@@ -12,6 +12,8 @@ import { Institutions } from "./institutions";
 import { VaultAutoLock } from "./vault-ui";
 import { BankLinks, useAutoSync } from "./plaid";
 import { ghostButtonClass } from "./ui";
+import { Books } from "./books-ui";
+import { BUSINESS_CATEGORY_NAMES } from "./books";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -19,11 +21,13 @@ const TABS = [
   { id: "transactions", label: "Transactions" },
   { id: "bills", label: "Bills" },
   { id: "budgets", label: "Budgets" },
+  { id: "books", label: "Maverick books" },
   { id: "institutions", label: "Maverick Vault" },
 ];
 
 export function FinancialCenter() {
   const data = useMoneyData();
+  const cloud = useCloudState();
   const [tab, setTab] = useState("overview");
   const [view, setView] = useState<ScopeView>(() => {
     try {
@@ -40,7 +44,13 @@ export function FinancialCenter() {
     return <p className="text-sm text-zinc-500">Loading…</p>;
   }
 
-  const categories = categoriesInUse(data, DEFAULT_CATEGORIES);
+  const personalCategories = categoriesInUse(filterByScope(data, "personal"), DEFAULT_CATEGORIES);
+  const categories =
+    view === "business"
+      ? BUSINESS_CATEGORY_NAMES
+      : view === "personal"
+        ? personalCategories
+        : [...new Set([...personalCategories, ...BUSINESS_CATEGORY_NAMES])];
   const shown = filterByScope(data, view);
 
   function chooseView(v: ScopeView) {
@@ -101,8 +111,9 @@ export function FinancialCenter() {
           ))}
         </div>
         <span className="text-xs text-zinc-500">
-          {view === "all" ? "Showing personal and business together" : `Showing ${view} only`}
+          {view === "all" ? "Showing personal and Maverick together" : `Showing ${view === "business" ? "Maverick" : "personal"} only`}
         </span>
+        <CloudBadge state={cloud} />
       </div>
       <nav className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex max-w-full gap-1 overflow-x-auto rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900">
@@ -148,7 +159,20 @@ export function FinancialCenter() {
       {tab === "bills" && <Bills data={shown} categories={categories} />}
       {tab === "budgets" && <Budgets data={shown} categories={categories} />}
       {tab === "institutions" && <Institutions data={shown} />}
+      {tab === "books" && <Books data={data} goTo={setTab} />}
     </div>
     </ScopeContext.Provider>
   );
+}
+
+function CloudBadge({ state }: { state: ReturnType<typeof useCloudState> }) {
+  if (state === "off") return <span className="ml-auto text-xs text-zinc-400">Saved on this device only</span>;
+  if (state === "error")
+    return (
+      <button className="ml-auto text-xs text-rose-600 underline dark:text-rose-400" onClick={retryCloud}>
+        Couldn&apos;t save online. Try again
+      </button>
+    );
+  const label = state === "saving" ? "Saving…" : state === "loading" ? "Loading…" : "Saved online";
+  return <span className="ml-auto text-xs text-zinc-500">{label}</span>;
 }
