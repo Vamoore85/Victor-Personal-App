@@ -102,6 +102,8 @@ const BUSINESS_RULES: [RegExp, string][] = [
 ];
 
 export function businessGuess(description: string, income: boolean) {
+  // Moving money to or from your own personal account.
+  if (/xfer (to|from) chk|transfer (to|from) (chk|checking)/i.test(description)) return income ? "Owner contribution" : "Owner draw";
   if (income) return /refund|return/i.test(description) ? "Other business income" : "Sales & services";
   return BUSINESS_RULES.find(([re]) => re.test(description))?.[1] ?? "Other business expenses";
 }
