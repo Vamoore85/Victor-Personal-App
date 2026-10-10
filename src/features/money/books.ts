@@ -81,6 +81,31 @@ export function businessCategoryFor(plaidCategory: string, income: boolean) {
   return "Other business expenses";
 }
 
+/** Best guess from a statement description, for imports that carry no category. */
+const BUSINESS_RULES: [RegExp, string][] = [
+  [/google\s*\*?\s*ads|googleads|facebk|facebook|meta ads|instagram|linkedin ads|tiktok ads|yelp|mailchimp|canva/i, "Advertising & marketing"],
+  [/upwork|fiverr|contractor|freelance/i, "Contractors"],
+  [/adobe|microsoft|msft|google \*?workspace|gsuite|notion|slack|zoom|dropbox|github|openai|anthropic|claude|chatgpt|vercel|supabase|godaddy|squarespace|wix|quickbooks|intuit|docusign|calendly|apple\.com/i, "Software & subscriptions"],
+  [/\bfees?\b|service charge|overdraft|\bwire\b/i, "Bank & payment fees"],
+  [/attorney|law office|legal|cpa|accounting|bookkeep|tax prep|legalzoom/i, "Legal & professional"],
+  [/irs|comptroller|dept of revenue|department of revenue|secretary of state|license|permit/i, "Taxes & licenses"],
+  [/insurance|geico|state farm|progressive|allstate|hiscox|next insurance/i, "Business insurance"],
+  [/staples|office depot|officemax|fedex office|ups store|usps|postage/i, "Office expenses"],
+  [/airline|delta|united|american air|southwest|jetblue|hotel|marriott|hilton|hyatt|airbnb|expedia|amtrak/i, "Travel"],
+  [/shell|exxon|bp |sunoco|chevron|wawa|sheetz|parking|toll|ezpass|e-zpass|jiffy|auto/i, "Vehicle"],
+  [/uber|lyft/i, "Travel"],
+  [/restaurant|cafe|coffee|starbucks|mcdonald|chipotle|doordash|uber eats|grubhub|pizza|dunkin|grill|bar /i, "Business meals"],
+  [/verizon|at&t|t-mobile|comcast|xfinity|spectrum|cox|electric|energy|water|bge|pepco/i, "Utilities, phone & internet"],
+  [/home depot|lowe|repair|maintenance/i, "Repairs & maintenance"],
+  [/amazon|amzn|walmart|target|costco|best buy/i, "Supplies"],
+  [/\brent\b|\blease\b|wework|regus/i, "Rent"],
+];
+
+export function businessGuess(description: string, income: boolean) {
+  if (income) return /refund|return/i.test(description) ? "Other business income" : "Sales & services";
+  return BUSINESS_RULES.find(([re]) => re.test(description))?.[1] ?? "Other business expenses";
+}
+
 /* ---------------- Learned rules ---------------- */
 
 /** Description reduced to its stable part: "SQ *BLUE BOTTLE 1234 SF" -> "sq blue bottle sf". */

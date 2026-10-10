@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { booksCsv, estimatedTaxDueDates, periodsFor, profitAndLoss, taxSetAside, type LineTotal } from "./books";
 import { money, today } from "./calc";
-import type { MoneyData } from "./types";
-import { Card, Empty, Field, Stat, ghostButtonClass, inputClass } from "./ui";
+import { StatementImport } from "./import";
+import { newId, setMoneyData } from "./store";
+import { ACCOUNT_TYPES, type AccountType, type MoneyData } from "./types";
+import { Card, Empty, Field, Stat, buttonClass, ghostButtonClass, inputClass } from "./ui";
 
 const RATE_KEY = "maverick.books.taxRate";
 
@@ -50,17 +52,21 @@ export function Books({ data, goTo }: { data: MoneyData; goTo: (tab: string) => 
 
   if (!hasBusinessAccounts) {
     return (
-      <Card title="Maverick books">
-        <Empty>
-          Add or connect Maverick&apos;s bank and card accounts with the switch at the top set to Maverick. Their transactions then show up here
-          as profit and loss, sorted by Schedule C line.
-        </Empty>
-      </Card>
+      <div className="flex flex-col gap-6">
+        <Card title="Maverick books">
+          <Empty>
+            Start by adding Maverick&apos;s bank or card account below. Then import its statement, and the transactions show up here as profit
+            and loss, sorted by Schedule C line.
+          </Empty>
+        </Card>
+        <AddBusinessAccount />
+      </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-6">
+      <StatementImport data={data} scope="business" />
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Year">
           <select className={inputClass} value={year} onChange={(e) => setYear(Number(e.target.value))}>
@@ -185,6 +191,50 @@ function Row({ label, value, strong }: { label: string; value: number; strong?: 
     <div className={`flex justify-between gap-3 py-1 text-sm ${strong ? "font-medium" : ""}`}>
       <span>{label}</span>
       <span className={`tabular-nums ${value < 0 ? "text-rose-600 dark:text-rose-400" : ""}`}>{money(value)}</span>
+      <AddBusinessAccount />
     </div>
+  );
+}
+
+/** Quick way to add a Maverick account without leaving the books. */
+function AddBusinessAccount() {
+  const [name, setName] = useState("");
+  const [type, setType] = useState<AccountType>("checking");
+  const [opening, setOpening] = useState("");
+
+  function add(e: FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setMoneyData((d) => ({
+      ...d,
+      accounts: [...d.accounts, { id: newId(), name: name.trim(), type, openingBalance: Number(opening) || 0, scope: "business" }],
+    }));
+    setName("");
+    setOpening("");
+  }
+
+  return (
+    <Card title="Add a Maverick account">
+      <form onSubmit={add} className="grid gap-3 sm:grid-cols-4 sm:items-end">
+        <Field label="Name">
+          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="Maverick checking" />
+        </Field>
+        <Field label="Type">
+          <select className={inputClass} value={type} onChange={(e) => setType(e.target.value as AccountType)}>
+            {ACCOUNT_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Balance at the start of your statement">
+          <input className={inputClass} inputMode="decimal" value={opening} onChange={(e) => setOpening(e.target.value)} placeholder="0.00" />
+        </Field>
+        <button className={buttonClass} type="submit">
+          Add account
+        </button>
+      </form>
+    </Card>
   );
 }

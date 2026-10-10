@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { newId, setMoneyData } from "./store";
-import type { MoneyData, Transaction } from "./types";
+import type { MoneyData, Scope, Transaction } from "./types";
+import { BUSINESS_CATEGORY_NAMES, businessGuess, ruleCategory } from "./books";
 import { money } from "./calc";
 import { Card, Field, buttonClass, ghostButtonClass, inputClass } from "./ui";
 
@@ -116,7 +117,13 @@ type Row = Omit<Transaction, "id" | "accountId">;
 
 const TRANSFER_RE = /payment.*thank you|autopay|auto pay|online payment|card payment|pymt|transfer (to|from)|online transfer|zelle to self/i;
 
-function buildRows(rows: string[][], map: Mapping, positiveIsSpending: boolean): { rows: Row[]; skipped: number } {
+function buildRows(
+  rows: string[][],
+  map: Mapping,
+  positiveIsSpending: boolean,
+  data: MoneyData,
+  scope: Scope,
+): { rows: Row[]; skipped: number } {
   const out: Row[] = [];
   let skipped = 0;
   for (const r of rows) {
@@ -141,25 +148,30 @@ function buildRows(rows: string[][], map: Mapping, positiveIsSpending: boolean):
       out.push({ date, description, amount: Math.abs(signed), kind: signed > 0 ? "income" : "expense", category: "Transfer", transferId: "imported" });
       continue;
     }
-    out.push({
-      date,
-      description,
-      amount: Math.abs(signed),
-      kind: signed > 0 ? "income" : "expense",
-      category: signed > 0 && !(map.category >= 0 && r[map.category]) ? "Other income" : guessCategory(description, map.category >= 0 ? r[map.category] : ""),
-    });
+    const income = signed > 0;
+    const fromFile = map.category >= 0 ? r[map.category] ?? "" : "";
+    // A category you picked before for the same description wins; then a guess.
+    const learned = ruleCategory(data.rules, description, scope);
+    let category: string;
+    if (learned) category = learned;
+    else if (scope === "business") category = BUSINESS_CATEGORY_NAMES.includes(fromFile) ? fromFile : businessGuess(description, income);
+    else category = income && !fromFile ? "Other income" : guessCategory(description, fromFile);
+    out.push({ date, description, amount: Math.abs(signed), kind: income ? "income" : "expense", category });
   }
   return { rows: out, skipped };
 }
 
-export function StatementImport({ data }: { data: MoneyData }) {
+/** `scope` limits the account list, e.g. to Maverick's accounts on the books tab. */
+export function StatementImport({ data, scope }: { data: MoneyData; scope?: Scope }) {
   const [file, setFile] = useState<{ name: string; headers: string[]; rows: string[][] } | null>(null);
   const [map, setMap] = useState<Mapping | null>(null);
   const [accountId, setAccountId] = useState("");
   const [positiveIsSpending, setPositiveIsSpending] = useState<boolean | null>(null);
   const [message, setMessage] = useState("");
 
-  const account = data.accounts.find((a) => a.id === (accountId || data.accounts[0]?.id));
+  const accounts = scope ? data.accounts.filter((a) => (a.scope ?? "personal") === scope) : data.accounts;
+  const account = accounts.find((a) => a.id === (accountId || accounts[0]?.id));
+  const accountScope: Scope = account?.scope ?? "personal";
 
   async function load(f: File) {
     setMessage("");
@@ -176,7 +188,7 @@ export function StatementImport({ data }: { data: MoneyData }) {
     setPositiveIsSpending(null);
   }
 
-  if (data.accounts.length === 0) return null;
+  if (accounts.length === 0) return null;
 
   // Card statements usually list charges as positive numbers; bank statements as negative.
   const guessPositiveIsSpending = (() => {
@@ -186,7 +198,7 @@ export function StatementImport({ data }: { data: MoneyData }) {
     return account?.type === "credit" && positives > vals.length / 2;
   })();
   const flip = positiveIsSpending ?? guessPositiveIsSpending;
-  const built = file && map ? buildRows(file.rows, map, flip) : null;
+  const built = file && map ? buildRows(file.rows, map, flip, data, accountScope) : null;
 
   const existing = new Set(
     data.transactions
@@ -225,7 +237,7 @@ export function StatementImport({ data }: { data: MoneyData }) {
       <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
         <Field label="Into account">
           <select className={inputClass} value={account?.id ?? ""} onChange={(e) => setAccountId(e.target.value)}>
-            {data.accounts.map((a) => (
+            {accounts.map((a) => (
               <option key={a.id} value={a.id}>{a.name}</option>
             ))}
           </select>
