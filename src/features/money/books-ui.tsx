@@ -5,13 +5,15 @@ import { booksCsv, estimatedTaxDueDates, periodsFor, profitAndLoss, taxSetAside,
 import { money, today } from "./calc";
 import { StatementImport } from "./import";
 import { newId, setMoneyData } from "./store";
-import { ACCOUNT_TYPES, type AccountType, type MoneyData } from "./types";
+import { ACCOUNT_TYPES, COMPANIES, companyLabel, type AccountType, type Company, type MoneyData } from "./types";
 import { Card, Empty, Field, Stat, buttonClass, ghostButtonClass, inputClass } from "./ui";
 
 const RATE_KEY = "maverick.books.taxRate";
 
-/** Maverick's books: profit and loss by Schedule C line, tax set-aside, and a CPA export. */
-export function Books({ data, goTo }: { data: MoneyData; goTo: (tab: string) => void }) {
+/** A company's books: profit and loss by Schedule C line, tax set-aside, and a CPA export. */
+export function Books({ data, goTo, initialCompany = "business" }: { data: MoneyData; goTo: (tab: string) => void; initialCompany?: Company }) {
+  const [company, setCompany] = useState<Company>(initialCompany);
+  const name = companyLabel(company);
   const thisYear = Number(today().slice(0, 4));
   const [year, setYear] = useState(thisYear);
   const [periodIndex, setPeriodIndex] = useState(0);
@@ -24,11 +26,11 @@ export function Books({ data, goTo }: { data: MoneyData; goTo: (tab: string) => 
   });
   const periods = periodsFor(year);
   const period = periods[periodIndex];
-  const pl = profitAndLoss(data, period);
-  const hasBusinessAccounts = data.accounts.some((a) => a.scope === "business");
+  const pl = profitAndLoss(data, period, company);
+  const hasBusinessAccounts = data.accounts.some((a) => a.scope === company);
 
   // Tax set-aside is for the year to date, so it reflects the whole year's profit.
-  const ytd = profitAndLoss(data, periods[0]);
+  const ytd = profitAndLoss(data, periods[0], company);
   const tax = taxSetAside(ytd.taxableProfit, rate);
 
   function saveRate(n: number) {
@@ -41,11 +43,11 @@ export function Books({ data, goTo }: { data: MoneyData; goTo: (tab: string) => 
   }
 
   function exportCsv() {
-    const blob = new Blob([booksCsv(data, period)], { type: "text/csv" });
+    const blob = new Blob([booksCsv(data, period, company)], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `maverick-books-${period.label.replace(/\s+/g, "-")}.csv`;
+    a.download = `${name.toLowerCase()}-books-${period.label.replace(/\s+/g, "-")}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -53,20 +55,22 @@ export function Books({ data, goTo }: { data: MoneyData; goTo: (tab: string) => 
   if (!hasBusinessAccounts) {
     return (
       <div className="flex flex-col gap-6">
-        <Card title="Maverick books">
+        <CompanyPicker company={company} onChange={setCompany} />
+        <Card title={`${name} books`}>
           <Empty>
-            Start by adding Maverick&apos;s bank or card account below. Then import its statement, and the transactions show up here as profit
+            Start by adding {name}&apos;s bank or card account below. Then import its statement, and the transactions show up here as profit
             and loss, sorted by Schedule C line.
           </Empty>
         </Card>
-        <AddBusinessAccount />
+        <AddBusinessAccount company={company} />
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-6">
-      <StatementImport data={data} scope="business" />
+      <CompanyPicker company={company} onChange={setCompany} />
+      <StatementImport data={data} scope={company} />
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Year">
           <select className={inputClass} value={year} onChange={(e) => setYear(Number(e.target.value))}>
@@ -151,6 +155,7 @@ export function Books({ data, goTo }: { data: MoneyData; goTo: (tab: string) => 
           A rough estimate from this year&apos;s profit so far, not tax advice. Confirm amounts with your CPA.
         </p>
       </Card>
+      <AddBusinessAccount company={company} />
     </div>
   );
 }
@@ -191,13 +196,31 @@ function Row({ label, value, strong }: { label: string; value: number; strong?: 
     <div className={`flex justify-between gap-3 py-1 text-sm ${strong ? "font-medium" : ""}`}>
       <span>{label}</span>
       <span className={`tabular-nums ${value < 0 ? "text-rose-600 dark:text-rose-400" : ""}`}>{money(value)}</span>
-      <AddBusinessAccount />
     </div>
   );
 }
 
-/** Quick way to add a Maverick account without leaving the books. */
-function AddBusinessAccount() {
+function CompanyPicker({ company, onChange }: { company: Company; onChange: (c: Company) => void }) {
+  return (
+    <div role="radiogroup" aria-label="Company" className="flex gap-2">
+      {COMPANIES.map((c) => (
+        <button
+          key={c.value}
+          role="radio"
+          aria-checked={company === c.value}
+          onClick={() => onChange(c.value)}
+          className={company === c.value ? buttonClass : ghostButtonClass}
+        >
+          {c.legalName}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Quick way to add a company account without leaving the books. */
+function AddBusinessAccount({ company }: { company: Company }) {
+  const label = companyLabel(company);
   const [name, setName] = useState("");
   const [type, setType] = useState<AccountType>("checking");
   const [opening, setOpening] = useState("");
@@ -207,17 +230,17 @@ function AddBusinessAccount() {
     if (!name.trim()) return;
     setMoneyData((d) => ({
       ...d,
-      accounts: [...d.accounts, { id: newId(), name: name.trim(), type, openingBalance: Number(opening) || 0, scope: "business" }],
+      accounts: [...d.accounts, { id: newId(), name: name.trim(), type, openingBalance: Number(opening) || 0, scope: company }],
     }));
     setName("");
     setOpening("");
   }
 
   return (
-    <Card title="Add a Maverick account">
+    <Card title={`Add a ${label} account`}>
       <form onSubmit={add} className="grid gap-3 sm:grid-cols-4 sm:items-end">
         <Field label="Name">
-          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="Maverick checking" />
+          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder={`${label} checking`} />
         </Field>
         <Field label="Type">
           <select className={inputClass} value={type} onChange={(e) => setType(e.target.value as AccountType)}>

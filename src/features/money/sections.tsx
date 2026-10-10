@@ -9,7 +9,7 @@ import { UpcomingBills } from "./bills";
 import { StatementImport } from "./import";
 import { ScopeBadge, ScopeField, filterByScope, scopeOf, useDefaultScope } from "./scope";
 import type { Budget } from "./types";
-import type { Scope } from "./types";
+import { isCompany, type Scope } from "./types";
 import { Bar, Card, Empty, Field, Stat, buttonClass, ghostButtonClass, inputClass } from "./ui";
 
 /** Spending against a budget counts only transactions in the budget's own book. */
@@ -587,7 +587,7 @@ function TransactionList({ data, items, deletable }: { data: MoneyData; items: T
               {deletable && !t.transferId ? (
                 <CategoryPicker
                   value={t.category}
-                  options={scopes.get(t.accountId) === "business" ? BUSINESS_CATEGORY_NAMES : personalCategories}
+                  options={isCompany(scopes.get(t.accountId)) ? BUSINESS_CATEGORY_NAMES : personalCategories}
                   onChange={(category) => setMoneyData((d) => learnCategory(d, t, category, scopes.get(t.accountId) ?? "personal", newId))}
                 />
               ) : (

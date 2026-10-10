@@ -14,6 +14,8 @@ import { BankLinks, useAutoSync } from "./plaid";
 import { ghostButtonClass } from "./ui";
 import { Books } from "./books-ui";
 import { BUSINESS_CATEGORY_NAMES } from "./books";
+import { CommandCenter } from "./command-center";
+import { COMPANIES, isCompany, type Company } from "./types";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -21,7 +23,7 @@ const TABS = [
   { id: "transactions", label: "Transactions" },
   { id: "bills", label: "Bills" },
   { id: "budgets", label: "Budgets" },
-  { id: "books", label: "Maverick books" },
+  { id: "books", label: "Company books" },
   { id: "institutions", label: "Maverick Vault" },
 ];
 
@@ -32,11 +34,12 @@ export function FinancialCenter() {
   const [view, setView] = useState<ScopeView>(() => {
     try {
       const saved = typeof window !== "undefined" ? window.localStorage.getItem("maverick.money.view") : null;
-      return saved === "personal" || saved === "business" ? saved : "all";
+      return saved === "personal" || saved === "business" || saved === "gladiator" ? saved : "all";
     } catch {
       return "all";
     }
   });
+  const [booksCompany, setBooksCompany] = useState<Company | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   useAutoSync(data);
 
@@ -46,7 +49,7 @@ export function FinancialCenter() {
 
   const personalCategories = categoriesInUse(filterByScope(data, "personal"), DEFAULT_CATEGORIES);
   const categories =
-    view === "business"
+    isCompany(view === "all" ? undefined : view)
       ? BUSINESS_CATEGORY_NAMES
       : view === "personal"
         ? personalCategories
@@ -55,6 +58,7 @@ export function FinancialCenter() {
 
   function chooseView(v: ScopeView) {
     setView(v);
+    setBooksCompany(null);
     try {
       window.localStorage.setItem("maverick.money.view", v);
     } catch {
@@ -95,7 +99,7 @@ export function FinancialCenter() {
           {([
             ["all", "All"],
             ["personal", "Personal"],
-            ["business", "Maverick"],
+            ...COMPANIES.map((c) => [c.value, c.label] as const),
           ] as const).map(([v, label]) => (
             <button
               key={v}
@@ -111,7 +115,9 @@ export function FinancialCenter() {
           ))}
         </div>
         <span className="text-xs text-zinc-500">
-          {view === "all" ? "Showing personal and Maverick together" : `Showing ${view === "business" ? "Maverick" : "personal"} only`}
+          {view === "all"
+            ? "Showing everything together"
+            : `Showing ${COMPANIES.find((c) => c.value === view)?.legalName ?? "personal"} only`}
         </span>
         <CloudBadge state={cloud} />
       </div>
@@ -127,7 +133,7 @@ export function FinancialCenter() {
                   : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
               }`}
             >
-              {t.label}
+              {t.id === "overview" && view === "all" ? "Command center" : t.label}
             </button>
           ))}
         </div>
@@ -148,7 +154,19 @@ export function FinancialCenter() {
         </div>
       </nav>
 
-      {tab === "overview" && <Overview data={shown} goTo={setTab} />}
+      {tab === "overview" &&
+        (view === "all" ? (
+          <CommandCenter
+            data={data}
+            goTo={setTab}
+            openBooks={(c) => {
+              setBooksCompany(c);
+              setTab("books");
+            }}
+          />
+        ) : (
+          <Overview data={shown} goTo={setTab} />
+        ))}
       {tab === "accounts" && (
         <>
           <BankLinks data={shown} />
@@ -159,7 +177,14 @@ export function FinancialCenter() {
       {tab === "bills" && <Bills data={shown} categories={categories} />}
       {tab === "budgets" && <Budgets data={shown} categories={categories} />}
       {tab === "institutions" && <Institutions data={shown} />}
-      {tab === "books" && <Books data={data} goTo={setTab} />}
+      {tab === "books" && (
+        <Books
+          key={booksCompany ?? view}
+          data={data}
+          goTo={setTab}
+          initialCompany={booksCompany ?? (view === "gladiator" ? "gladiator" : "business")}
+        />
+      )}
     </div>
     </ScopeContext.Provider>
   );

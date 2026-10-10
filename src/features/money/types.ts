@@ -7,7 +7,17 @@ export const ACCOUNT_TYPES = [
   { value: "loan", label: "Loan", liability: true },
 ] as const;
 
-export type Scope = "personal" | "business";
+// "business" is Maverick LLC (the value predates Gladiator); "gladiator" is Gladiator Solutions Provider LLC.
+export type Scope = "personal" | "business" | "gladiator";
+export type Company = Exclude<Scope, "personal">;
+
+export const COMPANIES: { value: Company; label: string; legalName: string }[] = [
+  { value: "business", label: "Maverick", legalName: "Maverick LLC" },
+  { value: "gladiator", label: "Gladiator", legalName: "Gladiator Solutions Provider LLC" },
+];
+
+export const isCompany = (s: Scope | undefined): s is Company => s === "business" || s === "gladiator";
+export const companyLabel = (s: Scope | undefined) => COMPANIES.find((c) => c.value === s)?.label ?? "Personal";
 
 export type AccountType = (typeof ACCOUNT_TYPES)[number]["value"];
 

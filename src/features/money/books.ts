@@ -1,4 +1,4 @@
-import type { CategoryRule, MoneyData, Scope, Transaction } from "./types";
+import type { CategoryRule, Company, MoneyData, Scope, Transaction } from "./types";
 
 /*
  * Bookkeeping for Maverick, a one-owner LLC that files on Schedule C.
@@ -161,9 +161,9 @@ export function periodsFor(year: number): Period[] {
 
 export type LineTotal = { line: string; lineLabel: string; amount: number; categories: Map<string, number> };
 
-/** Profit and loss for the business transactions in the period. */
-export function profitAndLoss(data: MoneyData, period: Period) {
-  const businessAccounts = new Set(data.accounts.filter((a) => a.scope === "business").map((a) => a.id));
+/** Profit and loss for one company's transactions in the period. */
+export function profitAndLoss(data: MoneyData, period: Period, company: Company = "business") {
+  const businessAccounts = new Set(data.accounts.filter((a) => a.scope === company).map((a) => a.id));
   let income = 0;
   let cogs = 0;
   let expenses = 0;
@@ -268,10 +268,10 @@ const csvCell = (v: string | number) => {
 };
 
 /** Every business transaction in the period with its Schedule C line, for your CPA. */
-export function booksCsv(data: MoneyData, period: Period) {
+export function booksCsv(data: MoneyData, period: Period, company: Company = "business") {
   const accounts = new Map(data.accounts.map((a) => [a.id, a]));
   const rows = data.transactions
-    .filter((t) => accounts.get(t.accountId)?.scope === "business" && t.date >= period.start && t.date <= period.end)
+    .filter((t) => accounts.get(t.accountId)?.scope === company && t.date >= period.start && t.date <= period.end)
     .sort((a, b) => a.date.localeCompare(b.date));
   const header = ["Date", "Description", "Amount", "Category", "Schedule C line", "Line description", "Account"];
   const lines = rows.map((t) => {

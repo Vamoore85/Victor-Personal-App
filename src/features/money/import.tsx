@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { newId, setMoneyData } from "./store";
-import type { MoneyData, Scope, Transaction } from "./types";
+import { isCompany, type MoneyData, type Scope, type Transaction } from "./types";
 import { BUSINESS_CATEGORY_NAMES, businessGuess, ruleCategory } from "./books";
 import { money } from "./calc";
 import { Card, Field, buttonClass, ghostButtonClass, inputClass } from "./ui";
@@ -154,7 +154,7 @@ function buildRows(
     const learned = ruleCategory(data.rules, description, scope);
     let category: string;
     if (learned) category = learned;
-    else if (scope === "business") category = BUSINESS_CATEGORY_NAMES.includes(fromFile) ? fromFile : businessGuess(description, income);
+    else if (isCompany(scope)) category = BUSINESS_CATEGORY_NAMES.includes(fromFile) ? fromFile : businessGuess(description, income);
     else category = income && !fromFile ? "Other income" : guessCategory(description, fromFile);
     out.push({ date, description, amount: Math.abs(signed), kind: income ? "income" : "expense", category });
   }

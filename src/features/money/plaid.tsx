@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { setMoneyData, newId } from "./store";
 import { useDefaultScope, ScopeBadge } from "./scope";
-import type { Account, AccountType, BankLink, MoneyData, Transaction } from "./types";
+import { isCompany, type Account, type AccountType, type BankLink, type MoneyData, type Transaction } from "./types";
 import { isLiability } from "./calc";
 import { Card, Empty, buttonClass, ghostButtonClass } from "./ui";
 import { businessCategoryFor, ruleCategory } from "./books";
@@ -182,7 +182,7 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
       category:
         prev?.category ??
         ruleCategory(d.rules, pt.name, scope) ??
-        (scope === "business" ? businessCategoryFor(pt.category, income) : categoryFor(pt.category, income)),
+        (isCompany(scope) ? businessCategoryFor(pt.category, income) : categoryFor(pt.category, income)),
       categoryLocked: prev?.categoryLocked,
       accountId,
       transferId: prev?.transferId,
