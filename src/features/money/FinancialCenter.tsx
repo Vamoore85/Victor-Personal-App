@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ScopeContext, filterByScope, type ScopeView } from "./scope";
 import { cloudErrorMessage, importMoneyData, retryCloud, useCloudState, useMoneyData } from "./store";
 import { exportEncryptedVault, importEncryptedVault } from "./vault";
@@ -15,6 +15,7 @@ import { ghostButtonClass } from "./ui";
 import { Books } from "./books-ui";
 import { BUSINESS_CATEGORY_NAMES } from "./books";
 import { CommandCenter } from "./command-center";
+import { clearQuickBooksNotice, quickBooksNotice as readQuickBooksNotice } from "./quickbooks";
 import { COMPANIES, isCompany, type Company } from "./types";
 
 const TABS = [
@@ -30,7 +31,7 @@ const TABS = [
 export function FinancialCenter() {
   const data = useMoneyData();
   const cloud = useCloudState();
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState(() => (readQuickBooksNotice() ? "books" : "overview"));
   const [view, setView] = useState<ScopeView>(() => {
     try {
       const saved = typeof window !== "undefined" ? window.localStorage.getItem("maverick.money.view") : null;
@@ -39,9 +40,13 @@ export function FinancialCenter() {
       return "all";
     }
   });
-  const [booksCompany, setBooksCompany] = useState<Company | null>(null);
+  const [booksCompany, setBooksCompany] = useState<Company | null>(() => (readQuickBooksNotice() ? "gladiator" : null));
+  // Coming back from QuickBooks sign-in opens Gladiator's books with the result.
+  const [quickBooksNotice] = useState(readQuickBooksNotice);
   const fileRef = useRef<HTMLInputElement>(null);
   useAutoSync(data);
+
+  useEffect(clearQuickBooksNotice, []);
 
   if (!data) {
     return <p className="text-sm text-zinc-500">Loading…</p>;
@@ -183,6 +188,7 @@ export function FinancialCenter() {
           data={data}
           goTo={setTab}
           initialCompany={booksCompany ?? (view === "gladiator" ? "gladiator" : "business")}
+          quickBooksNotice={quickBooksNotice}
         />
       )}
     </div>

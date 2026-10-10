@@ -7,11 +7,25 @@ import { StatementImport } from "./import";
 import { newId, setMoneyData } from "./store";
 import { ACCOUNT_TYPES, COMPANIES, companyLabel, taxFormLabel, taxFormOf, type AccountType, type Company, type MoneyData } from "./types";
 import { Card, Empty, Field, Stat, buttonClass, ghostButtonClass, inputClass } from "./ui";
+import { QuickBooksPanel } from "./quickbooks";
+
+// Gladiator's bookkeeper keeps its books in QuickBooks.
+const QUICKBOOKS_COMPANY: Company = "gladiator";
 
 const RATE_KEY = "maverick.books.taxRate";
 
 /** A company's books: profit and loss by Schedule C line, tax set-aside, and a CPA export. */
-export function Books({ data, goTo, initialCompany = "business" }: { data: MoneyData; goTo: (tab: string) => void; initialCompany?: Company }) {
+export function Books({
+  data,
+  goTo,
+  initialCompany = "business",
+  quickBooksNotice,
+}: {
+  data: MoneyData;
+  goTo: (tab: string) => void;
+  initialCompany?: Company;
+  quickBooksNotice?: string | null;
+}) {
   const [company, setCompany] = useState<Company>(initialCompany);
   const name = companyLabel(company);
   const form = taxFormOf(company);
@@ -59,8 +73,10 @@ export function Books({ data, goTo, initialCompany = "business" }: { data: Money
     return (
       <div className="flex flex-col gap-6">
         <CompanyPicker company={company} onChange={setCompany} />
+        {company === QUICKBOOKS_COMPANY && <QuickBooksPanel year={thisYear} notice={quickBooksNotice} />}
         <Card title={`${name} books`}>
           <Empty>
+            {company === QUICKBOOKS_COMPANY && "Optional when QuickBooks is connected. "}
             Start by adding {name}&apos;s bank or card account below. Then import its statement, and the transactions show up here as profit
             and loss, sorted by {taxFormLabel(form)} line.
           </Empty>
@@ -73,6 +89,7 @@ export function Books({ data, goTo, initialCompany = "business" }: { data: Money
   return (
     <div className="flex flex-col gap-6">
       <CompanyPicker company={company} onChange={setCompany} />
+      {company === QUICKBOOKS_COMPANY && <QuickBooksPanel year={year} notice={quickBooksNotice} />}
       <StatementImport data={data} scope={company} />
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Year">
