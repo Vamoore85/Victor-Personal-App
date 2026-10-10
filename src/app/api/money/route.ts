@@ -36,8 +36,7 @@ function diagnose(e: unknown) {
     return "The database link still says [YOUR-PASSWORD]. Replace that part with your database password, without the brackets.";
   if (/^db\.[a-z0-9]+\.supabase\.co$/.test(host) && /ENOTFOUND|ENETUNREACH|EAI_AGAIN|EHOSTUNREACH/.test(code + msg))
     return "The database link is Supabase's \"Direct connection\", which Vercel can't reach. Use the \"Transaction pooler\" link instead (it ends in pooler.supabase.com:6543).";
-  if (code === "28P01" || /password authentication failed/i.test(msg))
-    return "Supabase rejected the database password in the link. Paste the link again with the current database password.";
+  if (code === "28P01" || /password authentication failed/i.test(msg)) return wrongPasswordHint(url);
   if (/Tenant or user not found/i.test(msg))
     return "Supabase didn't recognize the user in the link. Copy the pooler link fresh from Supabase's Connect button.";
   if (/ENOTFOUND|EAI_AGAIN/.test(code + msg)) return `The database address (${host}) couldn't be found. Copy the link fresh from Supabase.`;
@@ -80,4 +79,24 @@ export async function PUT(req: Request) {
   } catch (e) {
     return failed(e);
   }
+}
+
+// Clues about the password in the link, never the password itself.
+function wrongPasswordHint(url: string) {
+  const u = new URL(url);
+  let pw = u.password;
+  try {
+    pw = decodeURIComponent(pw);
+  } catch {
+    /* keep as typed */
+  }
+  const kind = u.hostname.includes("pooler.supabase.com") ? "pooler" : "direct";
+  const clues: string[] = [];
+  if (!pw) clues.push("the link has no password in it");
+  if (/[[\]]/.test(pw)) clues.push("the password still has [ ] brackets around it; remove them");
+  if (/YOUR-PASSWORD/i.test(pw)) clues.push("it still says YOUR-PASSWORD");
+  if (/\s/.test(pw)) clues.push("the password has a space in it");
+  if (/[@#/?%:]/.test(pw)) clues.push("the password has a symbol (@ # / ? % :) that can break the link");
+  const sum = clues.length ? ` Clues: ${clues.join("; ")}.` : "";
+  return `Supabase rejected the password in the link (a ${kind} link; the password in it is ${pw.length} characters long).${sum} Check it matches the new database password exactly, then save the link again in Vercel.`;
 }
