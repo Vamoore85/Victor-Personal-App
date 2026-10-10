@@ -9,13 +9,23 @@ import { EMPTY_DATA, type Account, type MoneyData, type Transaction } from "@/fe
  * there are skipped, so it is safe to leave set until it's removed.
  */
 
-type Pending = { account: { name: string; type: Account["type"]; openingBalance: number }; rows: [string, string, number, string][] };
+type Pending = {
+  account: { name: string; type: Account["type"]; openingBalance: number };
+  rows: [string, string, number, string][];
+  check?: { count: number; net: number }; // guards against a mistyped value
+};
 
 function pending(): Pending | null {
   const raw = process.env.PENDING_IMPORT;
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as Pending;
+    const p = JSON.parse(raw) as Pending;
+    const net = Math.round(p.rows.reduce((s, r) => s + r[2], 0) * 100) / 100;
+    if (p.check && (p.rows.length !== p.check.count || Math.abs(net - p.check.net) > 0.005)) {
+      console.error("PENDING_IMPORT failed its check", p.rows.length, net);
+      return null;
+    }
+    return p;
   } catch {
     console.error("PENDING_IMPORT isn't valid JSON");
     return null;
