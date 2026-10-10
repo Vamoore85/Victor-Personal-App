@@ -167,7 +167,7 @@ function ChangeMaster({ onDone }: { onDone: () => void }) {
   );
 }
 
-function CopyButton({ value, label }: { value: string; label: string }) {
+export function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button

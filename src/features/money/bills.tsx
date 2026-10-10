@@ -21,6 +21,7 @@ import {
   today,
 } from "./calc";
 import { Card, Empty, Field, Stat, buttonClass, ghostButtonClass, inputClass } from "./ui";
+import { BillsChart } from "./bills-chart";
 
 function parseAmount(s: string) {
   const n = Number(s.replace(/[$,\s]/g, ""));
@@ -189,7 +190,7 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
       institutionId: b.institutionId ?? "",
       scope: b.scope ?? "personal",
     });
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    document.getElementById("bill-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function remove() {
@@ -199,7 +200,6 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
     setEditingId(null);
   }
 
-  const sorted = [...data.bills].sort((a, b) => a.nextDue.localeCompare(b.nextDue));
   const monthly = data.bills.reduce((s, b) => s + billMonthlyCost(b), 0);
   const weekEnd = addDays(today(), 7);
   const dueThisWeek = data.bills.filter((b) => b.nextDue <= weekEnd).reduce((s, b) => s + b.amount, 0);
@@ -223,6 +223,9 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
         </div>
       )}
 
+      <BillsChart data={data} onEdit={edit} onPaid={markBillPaid} />
+
+      <div id="bill-form" className="scroll-mt-4">
       <Card title={editingId ? "Edit bill" : "Add a bill"}>
         <form onSubmit={save} className="grid gap-3 sm:grid-cols-3 sm:items-end">
           <Field label="Bill">
@@ -293,10 +296,7 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
           Press Paid when a bill comes out. If it has an account, the payment is logged as a transaction, and the bill moves to its next date.
         </p>
       </Card>
-
-      <Card title="All bills, next due first">
-        {sorted.length === 0 ? <Empty>No bills yet. Add rent, utilities, phone, insurance, subscriptions and so on.</Empty> : <BillRows items={sorted} onEdit={edit} />}
-      </Card>
+      </div>
 
       <Card
         title={`What comes out in ${monthLabel(month)}`}
