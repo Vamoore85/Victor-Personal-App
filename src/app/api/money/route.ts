@@ -1,5 +1,6 @@
 import { connection } from "next/server";
 import { databaseUrl, dbConfigured, readDoc, writeDoc } from "@/lib/db";
+import { applyPendingImport } from "@/lib/pending-import";
 import { sameOrigin, signedIn } from "@/lib/plaid-server";
 
 // Cloud copy of the Financial Center. The browser keeps a local copy too and
@@ -50,7 +51,13 @@ export async function GET(req: Request) {
   if (denied) return denied;
   if (!dbConfigured()) return Response.json({ configured: false });
   try {
-    const doc = await readDoc(KEY);
+    let doc = await readDoc(KEY);
+    // Merge in statements waiting in PENDING_IMPORT, if any.
+    const merged = applyPendingImport(doc?.data ?? null);
+    if (merged) {
+      const saved = await writeDoc(KEY, doc?.rev ?? 0, merged);
+      if (saved.ok) doc = { rev: saved.rev, data: merged };
+    }
     return Response.json({ configured: true, rev: doc?.rev ?? 0, data: doc?.data ?? null });
   } catch (e) {
     return failed(e);
