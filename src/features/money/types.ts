@@ -11,10 +11,16 @@ export const ACCOUNT_TYPES = [
 export type Scope = "personal" | "business" | "gladiator";
 export type Company = Exclude<Scope, "personal">;
 
-export const COMPANIES: { value: Company; label: string; legalName: string }[] = [
-  { value: "business", label: "Maverick", legalName: "Maverick LLC" },
-  { value: "gladiator", label: "Gladiator", legalName: "Gladiator Solutions Provider LLC" },
+// How each company files: Maverick is a one-owner LLC on Schedule C; Gladiator is an S-corp (Form 1120-S).
+export type TaxForm = "scheduleC" | "1120S";
+
+export const COMPANIES: { value: Company; label: string; legalName: string; taxForm: TaxForm }[] = [
+  { value: "business", label: "Maverick", legalName: "Maverick LLC", taxForm: "scheduleC" },
+  { value: "gladiator", label: "Gladiator", legalName: "Gladiator Solutions Provider LLC", taxForm: "1120S" },
 ];
+
+export const taxFormOf = (c: Company): TaxForm => COMPANIES.find((x) => x.value === c)?.taxForm ?? "scheduleC";
+export const taxFormLabel = (f: TaxForm) => (f === "1120S" ? "Form 1120-S" : "Schedule C");
 
 export const isCompany = (s: Scope | undefined): s is Company => s === "business" || s === "gladiator";
 export const companyLabel = (s: Scope | undefined) => COMPANIES.find((c) => c.value === s)?.label ?? "Personal";

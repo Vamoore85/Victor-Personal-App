@@ -46,7 +46,7 @@ export function CommandCenter({ data, goTo, openBooks }: { data: MoneyData; goTo
     const p = position(data, c.value);
     const ytd = profitAndLoss(data, ytdPeriod, c.value);
     const thisMonth = profitAndLoss(data, { start: `${month}-01`, end: `${month}-31`, label: month }, c.value);
-    return { ...c, ...p, ytd, thisMonth, tax: taxSetAside(ytd.taxableProfit, rate) };
+    return { ...c, ...p, ytd, thisMonth, tax: taxSetAside(ytd.taxableProfit, rate, c.taxForm) };
   });
 
   const businessCash = companies.reduce((s, c) => s + c.cash - c.debt, 0);
@@ -105,7 +105,7 @@ export function CommandCenter({ data, goTo, openBooks }: { data: MoneyData; goTo
                 <th className="py-1 pr-3 text-right font-normal">In · {monthLabel(month)}</th>
                 <th className="py-1 pr-3 text-right font-normal">Out · {monthLabel(month)}</th>
                 <th className="py-1 pr-3 text-right font-normal">Profit {year}</th>
-                <th className="py-1 pr-3 text-right font-normal">Owner draws</th>
+                <th className="py-1 pr-3 text-right font-normal">Draws / distributions</th>
                 <th className="py-1 text-right font-normal">Tax to set aside</th>
               </tr>
             </thead>
@@ -143,7 +143,8 @@ export function CommandCenter({ data, goTo, openBooks }: { data: MoneyData; goTo
         </div>
         <p className="mt-3 text-xs text-zinc-500">
           Business cash belongs to each company, so it isn&apos;t counted in personal net worth. Tax to set aside is a rough
-          estimate at your {rate}% income tax rate plus self-employment tax; confirm with your CPA.
+          estimate at your {rate}% income tax rate, plus self-employment tax for Maverick (Gladiator is an S-corp, so none);
+          confirm with your CPA.
           {nextTax && ` Next estimated payment: ${nextTax.label}, due ${shortDate(nextTax.due)}.`}
         </p>
       </Card>

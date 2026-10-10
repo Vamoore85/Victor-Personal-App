@@ -1,4 +1,4 @@
-import type { CategoryRule, Company, MoneyData, Scope, Transaction } from "./types";
+import { taxFormOf, type CategoryRule, type Company, type MoneyData, type Scope, type TaxForm, type Transaction } from "./types";
 
 /*
  * Bookkeeping for Maverick, a one-owner LLC that files on Schedule C.
@@ -38,6 +38,10 @@ export const BUSINESS_CATEGORIES: BusinessCategory[] = [
   { name: "Business meals", kind: "expense", line: "24b", lineLabel: "Deductible meals", deductible: 0.5 },
   { name: "Utilities, phone & internet", kind: "expense", line: "25", lineLabel: "Utilities" },
   { name: "Wages", kind: "expense", line: "26", lineLabel: "Wages" },
+  { name: "Officer salary", kind: "expense", line: "26", lineLabel: "Wages" }, // S-corp owner's own paycheck
+  { name: "Payroll taxes", kind: "expense", line: "23", lineLabel: "Taxes and licenses" },
+  { name: "Employee benefits", kind: "expense", line: "14", lineLabel: "Employee benefit programs" },
+  { name: "Retirement plan", kind: "expense", line: "19", lineLabel: "Pension and profit-sharing plans" },
   { name: "Software & subscriptions", kind: "expense", line: "27a", lineLabel: "Other expenses" },
   { name: "Bank & payment fees", kind: "expense", line: "27a", lineLabel: "Other expenses" },
   { name: "Education & training", kind: "expense", line: "27a", lineLabel: "Other expenses" },
@@ -53,6 +57,35 @@ export const BUSINESS_CATEGORIES: BusinessCategory[] = [
 
 export const BUSINESS_CATEGORY_NAMES = BUSINESS_CATEGORIES.map((c) => c.name);
 const byName = new Map(BUSINESS_CATEGORIES.map((c) => [c.name, c]));
+
+/* Form 1120-S (S-corp) page 1 lines, for Gladiator. Anything not listed goes on line 20, other deductions. */
+const S_CORP_LINES: Record<string, [string, string]> = {
+  "Sales & services": ["1a", "Gross receipts or sales"],
+  "Refunds given": ["1b", "Returns and allowances"],
+  "Other business income": ["5", "Other income"],
+  "Cost of goods & materials": ["2", "Cost of goods sold"],
+  "Officer salary": ["7", "Compensation of officers"],
+  Wages: ["8", "Salaries and wages"],
+  "Repairs & maintenance": ["9", "Repairs and maintenance"],
+  Rent: ["11", "Rents"],
+  "Equipment rental": ["11", "Rents"],
+  "Taxes & licenses": ["12", "Taxes and licenses"],
+  "Payroll taxes": ["12", "Taxes and licenses"],
+  "Business interest": ["13", "Interest"],
+  "Advertising & marketing": ["16", "Advertising"],
+  "Retirement plan": ["17", "Pension, profit-sharing, etc., plans"],
+  "Employee benefits": ["18", "Employee benefit programs"],
+};
+
+/** The tax-form line a category lands on for a company that files `form`. */
+export function lineFor(c: BusinessCategory, form: TaxForm): { line: string; lineLabel: string } {
+  if (form === "scheduleC") return c;
+  if (c.kind === "equity" || c.kind === "transfer") return { line: "—", lineLabel: "Not on Form 1120-S page 1" };
+  if (c.kind === "asset") return c;
+  const s = S_CORP_LINES[c.name];
+  if (s) return { line: s[0], lineLabel: s[1] };
+  return c.kind === "income" ? { line: "5", lineLabel: "Other income" } : { line: "20", lineLabel: "Other deductions" };
+}
 
 export const businessCategory = (name: string) => byName.get(name);
 
@@ -85,6 +118,7 @@ export function businessCategoryFor(plaidCategory: string, income: boolean) {
 const BUSINESS_RULES: [RegExp, string][] = [
   [/google\s*\*?\s*ads|googleads|facebk|facebook|meta ads|instagram|linkedin ads|tiktok ads|yelp|mailchimp|canva/i, "Advertising & marketing"],
   [/upwork|fiverr|contractor|freelance/i, "Contractors"],
+  [/\badp\b|paychex|gusto|payroll/i, "Wages"],
   [/adobe|microsoft|msft|google \*?workspace|gsuite|notion|slack|zoom|dropbox|github|openai|anthropic|claude|chatgpt|vercel|supabase|godaddy|squarespace|wix|quickbooks|intuit|docusign|calendly|apple\.com/i, "Software & subscriptions"],
   [/\bfees?\b|service charge|overdraft|\bwire\b/i, "Bank & payment fees"],
   [/attorney|law office|legal|cpa|accounting|bookkeep|tax prep|legalzoom/i, "Legal & professional"],
@@ -164,6 +198,7 @@ export type LineTotal = { line: string; lineLabel: string; amount: number; categ
 /** Profit and loss for one company's transactions in the period. */
 export function profitAndLoss(data: MoneyData, period: Period, company: Company = "business") {
   const businessAccounts = new Set(data.accounts.filter((a) => a.scope === company).map((a) => a.id));
+  const form = taxFormOf(company);
   let income = 0;
   let cogs = 0;
   let expenses = 0;
@@ -175,8 +210,9 @@ export function profitAndLoss(data: MoneyData, period: Period, company: Company 
   const incomeLines = new Map<string, LineTotal>();
   const expenseLines = new Map<string, LineTotal>();
   const add = (map: Map<string, LineTotal>, c: BusinessCategory, amount: number) => {
-    const key = `${c.line} ${c.lineLabel}`;
-    const row = map.get(key) ?? { line: c.line, lineLabel: c.lineLabel, amount: 0, categories: new Map() };
+    const l = lineFor(c, form);
+    const key = `${l.line} ${l.lineLabel}`;
+    const row = map.get(key) ?? { line: l.line, lineLabel: l.lineLabel, amount: 0, categories: new Map() };
     row.amount += amount;
     row.categories.set(c.name, (row.categories.get(c.name) ?? 0) + amount);
     map.set(key, row);
@@ -243,8 +279,11 @@ export function profitAndLoss(data: MoneyData, period: Period, company: Company 
  * tax (15.3% on 92.35% of profit, Social Security part capped) plus income tax
  * at the rate you choose. An estimate only, not tax advice.
  */
-export function taxSetAside(profit: number, incomeTaxRate: number) {
+export function taxSetAside(profit: number, incomeTaxRate: number, form: TaxForm = "scheduleC") {
   if (profit <= 0) return { seTax: 0, incomeTax: 0, total: 0 };
+  // S-corp profit passes to your return as K-1 income with no self-employment
+  // tax; your salary is already taxed through payroll.
+  if (form === "1120S") return { seTax: 0, incomeTax: profit * (incomeTaxRate / 100), total: profit * (incomeTaxRate / 100) };
   const seBase = profit * 0.9235;
   const SS_WAGE_BASE = 176_100; // 2025 Social Security wage base
   const seTax = Math.min(seBase, SS_WAGE_BASE) * 0.124 + seBase * 0.029;
@@ -267,23 +306,26 @@ const csvCell = (v: string | number) => {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
-/** Every business transaction in the period with its Schedule C line, for your CPA. */
+/** Every company transaction in the period with its tax-form line, for your CPA. */
 export function booksCsv(data: MoneyData, period: Period, company: Company = "business") {
   const accounts = new Map(data.accounts.map((a) => [a.id, a]));
   const rows = data.transactions
     .filter((t) => accounts.get(t.accountId)?.scope === company && t.date >= period.start && t.date <= period.end)
     .sort((a, b) => a.date.localeCompare(b.date));
-  const header = ["Date", "Description", "Amount", "Category", "Schedule C line", "Line description", "Account"];
+  const form = taxFormOf(company);
+  const formName = form === "1120S" ? "Form 1120-S" : "Schedule C";
+  const header = ["Date", "Description", "Amount", "Category", `${formName} line`, "Line description", "Account"];
   const lines = rows.map((t) => {
     const c = byName.get(t.category);
+    const l = c ? lineFor(c, form) : undefined;
     const amount = (t.kind === "income" ? t.amount : -t.amount).toFixed(2);
     return [
       t.date,
       t.description,
       amount,
       t.transferId ? "Transfer" : t.category,
-      t.transferId ? "—" : (c?.line ?? "Needs category"),
-      t.transferId ? "Not on Schedule C" : (c?.lineLabel ?? ""),
+      t.transferId ? "—" : (l?.line ?? "Needs category"),
+      t.transferId ? `Not on ${formName}` : (l?.lineLabel ?? ""),
       accounts.get(t.accountId)?.name ?? "",
     ].map(csvCell).join(",");
   });

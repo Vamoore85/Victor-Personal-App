@@ -5,7 +5,7 @@ import { booksCsv, estimatedTaxDueDates, periodsFor, profitAndLoss, taxSetAside,
 import { money, today } from "./calc";
 import { StatementImport } from "./import";
 import { newId, setMoneyData } from "./store";
-import { ACCOUNT_TYPES, COMPANIES, companyLabel, type AccountType, type Company, type MoneyData } from "./types";
+import { ACCOUNT_TYPES, COMPANIES, companyLabel, taxFormLabel, taxFormOf, type AccountType, type Company, type MoneyData } from "./types";
 import { Card, Empty, Field, Stat, buttonClass, ghostButtonClass, inputClass } from "./ui";
 
 const RATE_KEY = "maverick.books.taxRate";
@@ -14,6 +14,9 @@ const RATE_KEY = "maverick.books.taxRate";
 export function Books({ data, goTo, initialCompany = "business" }: { data: MoneyData; goTo: (tab: string) => void; initialCompany?: Company }) {
   const [company, setCompany] = useState<Company>(initialCompany);
   const name = companyLabel(company);
+  const form = taxFormOf(company);
+  const sCorp = form === "1120S";
+  const drawsLabel = sCorp ? "Shareholder distributions" : "Owner draws";
   const thisYear = Number(today().slice(0, 4));
   const [year, setYear] = useState(thisYear);
   const [periodIndex, setPeriodIndex] = useState(0);
@@ -31,7 +34,7 @@ export function Books({ data, goTo, initialCompany = "business" }: { data: Money
 
   // Tax set-aside is for the year to date, so it reflects the whole year's profit.
   const ytd = profitAndLoss(data, periods[0], company);
-  const tax = taxSetAside(ytd.taxableProfit, rate);
+  const tax = taxSetAside(ytd.taxableProfit, rate, form);
 
   function saveRate(n: number) {
     setRate(n);
@@ -59,7 +62,7 @@ export function Books({ data, goTo, initialCompany = "business" }: { data: Money
         <Card title={`${name} books`}>
           <Empty>
             Start by adding {name}&apos;s bank or card account below. Then import its statement, and the transactions show up here as profit
-            and loss, sorted by Schedule C line.
+            and loss, sorted by {taxFormLabel(form)} line.
           </Empty>
         </Card>
         <AddBusinessAccount company={company} />
@@ -110,7 +113,7 @@ export function Books({ data, goTo, initialCompany = "business" }: { data: Money
         <Stat label="Income" value={money(pl.income)} />
         <Stat label="Expenses" value={money(pl.cogs + pl.expenses)} />
         <Stat label="Net profit" value={money(pl.netProfit)} tone={pl.netProfit >= 0 ? "good" : "bad"} />
-        <Stat label="Owner draws" value={money(pl.draws)} />
+        <Stat label={drawsLabel} value={money(pl.draws)} />
       </div>
 
       <Card title={`Profit and loss · ${period.label}`}>
@@ -118,17 +121,25 @@ export function Books({ data, goTo, initialCompany = "business" }: { data: Money
         {pl.cogs > 0 && <Row label="Gross profit" value={pl.grossProfit} strong />}
         <PlTable title="Expenses" lines={pl.expenseLines} total={pl.cogs + pl.expenses} />
         <div className="mt-2 border-t border-zinc-300 pt-2 dark:border-zinc-700">
-          <Row label="Net profit (Schedule C line 31, before adjustments)" value={pl.netProfit} strong />
+          <Row
+            label={sCorp ? "Ordinary business income (Form 1120-S line 21, before adjustments)" : "Net profit (Schedule C line 31, before adjustments)"}
+            value={pl.netProfit}
+            strong
+          />
           {pl.taxableProfit !== pl.netProfit && <Row label="After the 50% meals limit" value={pl.taxableProfit} />}
         </div>
         <div className="mt-4 grid gap-1 text-xs text-zinc-500">
-          <p>Not profit or loss: owner contributions {money(pl.contributions)} · owner draws {money(pl.draws)} · equipment purchases {money(pl.assets)} (ask your CPA about depreciation).</p>
+          <p>Not profit or loss: {sCorp ? "shareholder contributions" : "owner contributions"} {money(pl.contributions)} · {drawsLabel.toLowerCase()} {money(pl.draws)} · equipment purchases {money(pl.assets)} (ask your CPA about depreciation).</p>
         </div>
       </Card>
 
       <Card title={`Taxes to set aside · ${year} so far`}>
         <div className="grid gap-3 sm:grid-cols-3">
-          <Stat label="Self-employment tax" value={money(tax.seTax)} />
+          {sCorp ? (
+            <Stat label="Self-employment tax" value="None (S-corp)" />
+          ) : (
+            <Stat label="Self-employment tax" value={money(tax.seTax)} />
+          )}
           <Stat label={`Income tax at ${rate}%`} value={money(tax.incomeTax)} />
           <Stat label="Set aside" value={money(tax.total)} tone="bad" />
         </div>
@@ -152,7 +163,9 @@ export function Books({ data, goTo, initialCompany = "business" }: { data: Money
           </div>
         </div>
         <p className="mt-3 text-xs text-zinc-500">
-          A rough estimate from this year&apos;s profit so far, not tax advice. Confirm amounts with your CPA.
+          {sCorp
+            ? "Gladiator's profit passes to your personal return on a K-1, taxed at your rate with no self-employment tax. Your salary is taxed through payroll, so it isn't counted here. A rough estimate, not tax advice. Confirm with your CPA."
+            : "A rough estimate from this year's profit so far, not tax advice. Confirm amounts with your CPA."}
         </p>
       </Card>
       <AddBusinessAccount company={company} />
