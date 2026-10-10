@@ -167,6 +167,20 @@ export type CategoryRule = {
   scope?: Scope;
 };
 
+// A receipt photo or PDF. The file itself is stored on the server under its id.
+export type Receipt = {
+  id: string;
+  date: string; // YYYY-MM-DD, the purchase date
+  merchant: string;
+  amount: number | null;
+  note: string;
+  transactionId?: string; // the transaction it backs up
+  scope?: Scope;
+  contentType: string;
+  size: number;
+  addedAt: string;
+};
+
 export type MoneyData = {
   version: 1;
   accounts: Account[];
@@ -176,6 +190,7 @@ export type MoneyData = {
   bills: Bill[];
   institutions: Institution[];
   bankLinks: BankLink[];
+  receipts: Receipt[];
 };
 
 export const EMPTY_DATA: MoneyData = {
@@ -187,4 +202,5 @@ export const EMPTY_DATA: MoneyData = {
   bills: [],
   institutions: [],
   bankLinks: [],
+  receipts: [],
 };

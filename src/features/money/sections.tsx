@@ -11,6 +11,7 @@ import { ScopeBadge, ScopeField, filterByScope, scopeOf, useDefaultScope } from 
 import type { Budget } from "./types";
 import { isCompany, type Scope } from "./types";
 import { Bar, Card, Empty, Field, Stat, buttonClass, ghostButtonClass, inputClass } from "./ui";
+import { AttachReceipt, receiptFor } from "./receipts";
 
 /** Spending against a budget counts only transactions in the budget's own book. */
 function budgetSpent(data: MoneyData, b: Budget, month: string) {
@@ -594,6 +595,7 @@ function TransactionList({ data, items, deletable }: { data: MoneyData; items: T
                 <span>{t.category}</span>
               )}
               <span>· {names.get(t.accountId) ?? "Unknown account"}</span>
+              {t.kind === "expense" && !t.transferId && <ReceiptMark data={data} t={t} scope={scopes.get(t.accountId) ?? "personal"} />}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-3">
@@ -620,6 +622,22 @@ function TransactionList({ data, items, deletable }: { data: MoneyData; items: T
       ))}
     </ul>
   );
+}
+
+function ReceiptMark({ data, t, scope }: { data: MoneyData; t: Transaction; scope: Scope }) {
+  const r = receiptFor(data, t.id);
+  if (r) {
+    return (
+      <a href={`/api/receipts/${r.id}`} target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:underline dark:text-emerald-400">
+        · 🧾 Receipt
+      </a>
+    );
+  }
+  return isCompany(scope) ? (
+    <span>
+      · <AttachReceipt t={t} scope={scope} />
+    </span>
+  ) : null;
 }
 
 /** Changing a category also teaches the app: others described the same way follow, now and on future syncs. */

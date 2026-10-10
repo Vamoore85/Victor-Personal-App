@@ -15,6 +15,7 @@ import { ghostButtonClass } from "./ui";
 import { Books } from "./books-ui";
 import { BUSINESS_CATEGORY_NAMES } from "./books";
 import { CommandCenter } from "./command-center";
+import { Receipts } from "./receipts";
 import { clearQuickBooksNotice, quickBooksNotice as readQuickBooksNotice } from "./quickbooks";
 import { COMPANIES, isCompany, type Company } from "./types";
 
@@ -25,6 +26,7 @@ const TABS = [
   { id: "bills", label: "Bills" },
   { id: "budgets", label: "Budgets" },
   { id: "books", label: "Company books" },
+  { id: "receipts", label: "Receipts" },
   { id: "institutions", label: "Maverick Vault" },
 ];
 
@@ -182,6 +184,7 @@ export function FinancialCenter() {
       {tab === "bills" && <Bills data={shown} categories={categories} />}
       {tab === "budgets" && <Budgets data={shown} categories={categories} />}
       {tab === "institutions" && <Institutions data={shown} />}
+      {tab === "receipts" && <Receipts data={shown} />}
       {tab === "books" && (
         <Books
           key={booksCompany ?? view}

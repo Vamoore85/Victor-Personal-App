@@ -114,6 +114,14 @@ create table if not exists app_doc_history (
 create index if not exists app_doc_history_key on app_doc_history (key, id desc);
 alter table app_docs enable row level security;
 alter table app_doc_history enable row level security;
+create table if not exists app_files (
+  id text primary key,
+  content_type text not null,
+  size integer not null,
+  data bytea not null,
+  created_at timestamptz not null default now()
+);
+alter table app_files enable row level security;
 `;
 
 const KEEP_VERSIONS = 300;
@@ -179,4 +187,22 @@ export async function writeDoc(key: string, baseRev: number, data: unknown): Pro
   } finally {
     client.release();
   }
+}
+
+/** Files such as receipt photos, stored whole in their own table. */
+export async function putFile(id: string, contentType: string, data: Buffer) {
+  await (await db()).query(
+    `insert into app_files (id, content_type, size, data) values ($1, $2, $3, $4)
+     on conflict (id) do update set content_type = excluded.content_type, size = excluded.size, data = excluded.data`,
+    [id, contentType, data.length, data],
+  );
+}
+
+export async function getFile(id: string): Promise<{ contentType: string; data: Buffer } | null> {
+  const { rows } = await (await db()).query("select content_type, data from app_files where id = $1", [id]);
+  return rows[0] ? { contentType: rows[0].content_type, data: rows[0].data } : null;
+}
+
+export async function deleteFile(id: string) {
+  await (await db()).query("delete from app_files where id = $1", [id]);
 }

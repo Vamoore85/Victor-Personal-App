@@ -41,6 +41,7 @@ export function filterByScope(data: MoneyData, view: ScopeView): MoneyData {
     bills: data.bills.filter(inView),
     institutions: data.institutions.filter(inView),
     bankLinks: data.bankLinks.filter(inView),
+    receipts: data.receipts.filter(inView),
   };
 }
 
