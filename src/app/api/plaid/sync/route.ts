@@ -41,7 +41,7 @@ const slim = (t: PlaidTxn) => ({
 
 // Fetches balances and every transaction change since the last sync.
 export const POST = handle(async (body) => {
-  const creds = credsFrom(body);
+  const creds = await credsFrom(body);
   const access_token = unseal(creds, body.link);
   let cursor = typeof body.cursor === "string" ? body.cursor : "";
   const added: PlaidTxn[] = [];

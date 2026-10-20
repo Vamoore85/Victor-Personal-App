@@ -1,8 +1,13 @@
-import { handle, plaid, PlaidError, sealCreds } from "@/lib/plaid-server";
+import { handle, plaid, PlaidError, saveSiteCreds, sealCreds } from "@/lib/plaid-server";
 
-// Checks Plaid keys typed into the Financial Center and hands them back sealed,
-// so the browser can keep them without being able to read them.
+// Checks Plaid keys typed into the Financial Center and saves them, sealed,
+// for the whole site so they're entered once. Without the online database the
+// sealed copy goes back to the browser to keep on that device.
 export const POST = handle(async (body) => {
+  if (body.remove === true) {
+    await saveSiteCreds(null);
+    return { removed: true };
+  }
   const clientId = typeof body.clientId === "string" ? body.clientId.trim() : "";
   const secret = typeof body.secret === "string" ? body.secret.trim() : "";
   const env = body.env === "production" ? "production" : "sandbox";
@@ -14,5 +19,6 @@ export const POST = handle(async (body) => {
       "BAD_KEYS",
     );
   });
-  return { keys: sealCreds(creds), env };
+  const site = await saveSiteCreds(creds);
+  return { keys: site ? undefined : sealCreds(creds), env, site };
 });

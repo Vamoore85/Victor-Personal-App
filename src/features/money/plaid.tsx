@@ -35,12 +35,15 @@ type SyncResult = { cursor: string; institution: string; accounts: SyncAccount[]
 const STALE_MS = 4 * 60 * 60 * 1000; // sync on open when the last sync is older than this
 
 /*
- * Plaid keys typed in below are kept in this browser only in sealed form
- * (sealed by the server with the site password), next to which environment
- * they're for. They're sent along with every bank call.
+ * Plaid keys typed in below are saved by the server for the whole site, so
+ * every view and device uses the same ones. Without the online database they
+ * fall back to this browser, sealed by the server with the site password, and
+ * are sent along with every bank call.
  */
 const KEYS_STORAGE = "maverick-plaid-keys";
 type SavedKeys = { keys: string; env: string };
+type ServerKeys = { fromSettings: boolean; env: string | null; site: boolean };
+type KeysResult = { keys?: string; env: string; site: boolean };
 
 function savedKeys(): SavedKeys | null {
   try {
@@ -248,7 +251,7 @@ export function useAutoSync(data: MoneyData | null) {
 
 export function BankLinks({ data }: { data: MoneyData }) {
   const scope = useDefaultScope();
-  const [server, setServer] = useState<{ fromSettings: boolean; env: string } | null>(null);
+  const [server, setServer] = useState<ServerKeys | null>(null);
   const [local, setLocal] = useState<SavedKeys | null>(null);
   const [editingKeys, setEditingKeys] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -256,17 +259,18 @@ export function BankLinks({ data }: { data: MoneyData }) {
 
   useEffect(() => {
     setLocal(savedKeys());
-    api<{ fromSettings: boolean; env: string }>("status")
+    api<ServerKeys>("status")
       .then(setServer)
-      .catch(() => setServer({ fromSettings: false, env: "sandbox" }));
+      .catch(() => setServer({ fromSettings: false, env: null, site: false }));
   }, []);
 
+  const shared = !!server && (server.fromSettings || server.site);
   const status = server && {
-    configured: server.fromSettings || !!local,
-    env: server.fromSettings ? server.env : (local?.env ?? "sandbox"),
+    configured: shared || !!local,
+    env: shared ? (server.env ?? "sandbox") : (local?.env ?? "sandbox"),
   };
 
-  function keysSaved(k: SavedKeys | null) {
+  function keepLocal(k: SavedKeys | null) {
     try {
       if (k) localStorage.setItem(KEYS_STORAGE, JSON.stringify(k));
       else localStorage.removeItem(KEYS_STORAGE);
@@ -274,7 +278,28 @@ export function BankLinks({ data }: { data: MoneyData }) {
       /* private window: the keys last until the tab closes */
     }
     setLocal(k);
+  }
+
+  function keysSaved(r: KeysResult) {
+    if (r.site) {
+      keepLocal(null); // the site's copy replaces any older one on this device
+      setServer({ fromSettings: false, env: r.env, site: true });
+    } else if (r.keys) {
+      keepLocal({ keys: r.keys, env: r.env });
+    }
     setEditingKeys(false);
+  }
+
+  async function removeKeys() {
+    if (!confirm("Remove the Plaid keys? Connected banks stop syncing until you add them again.")) return;
+    setMessage("");
+    try {
+      if (server?.site) await api("keys", { remove: true });
+      keepLocal(null);
+      setServer((s) => s && { ...s, env: null, site: false });
+    } catch (e) {
+      setMessage((e as Error).message);
+    }
   }
 
   async function connect() {
@@ -347,13 +372,15 @@ export function BankLinks({ data }: { data: MoneyData }) {
         <PlaidKeysForm onSaved={keysSaved} onCancel={local ? () => setEditingKeys(false) : undefined} />
       ) : (
         <p className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
-          <span>Plaid keys saved on this device ({status?.env === "production" ? "Live banks" : "Test mode"}).</span>
+          <span>
+            Plaid keys saved {server.site ? "for your whole site" : "on this device"} ({status?.env === "production" ? "Live banks" : "Test mode"}).
+          </span>
           <button className="underline hover:text-brand" onClick={() => setEditingKeys(true)} disabled={busy !== null}>
             Change keys
           </button>
           <button
             className="underline hover:text-rose-600"
-            onClick={() => confirm("Remove the Plaid keys from this device? Connected banks stop syncing here until you add them again.") && keysSaved(null)}
+            onClick={removeKeys}
             disabled={busy !== null}
           >
             Remove keys
@@ -411,10 +438,10 @@ const inputClass =
   "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-ember/50";
 
 /** Where you paste your Plaid keys. They're checked with Plaid, then saved sealed on this device. */
-function PlaidKeysForm({ onSaved, onCancel }: { onSaved: (k: SavedKeys) => void; onCancel?: () => void }) {
+function PlaidKeysForm({ onSaved, onCancel }: { onSaved: (r: KeysResult) => void; onCancel?: () => void }) {
   const [clientId, setClientId] = useState("");
   const [secret, setSecret] = useState("");
-  const [env, setEnv] = useState("sandbox");
+  const [env, setEnv] = useState("production");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -423,7 +450,7 @@ function PlaidKeysForm({ onSaved, onCancel }: { onSaved: (k: SavedKeys) => void;
     setError("");
     setSaving(true);
     try {
-      onSaved(await api<SavedKeys>("keys", { clientId, secret, env, keys: undefined }));
+      onSaved(await api<KeysResult>("keys", { clientId, secret, env, keys: undefined }));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -440,7 +467,7 @@ function PlaidKeysForm({ onSaved, onCancel }: { onSaved: (k: SavedKeys) => void;
           <a className="underline hover:text-brand" href="https://dashboard.plaid.com/developers/keys" target="_blank" rel="noreferrer">
             Developers, then Keys
           </a>
-          . They&apos;re checked with Plaid and saved locked on this device; enter them once on each device you use.
+          . They&apos;re checked with Plaid and saved locked for your whole site, so you only enter them once.
         </p>
       </div>
       <label className="block text-sm">
@@ -454,8 +481,8 @@ function PlaidKeysForm({ onSaved, onCancel }: { onSaved: (k: SavedKeys) => void;
       <label className="block text-sm">
         <span className="mb-1 block text-zinc-600 dark:text-zinc-400">Which keys are these?</span>
         <select className={inputClass} value={env} onChange={(e) => setEnv(e.target.value)}>
-          <option value="sandbox">Sandbox (test banks, made-up data)</option>
           <option value="production">Production (your real banks)</option>
+          <option value="sandbox">Sandbox (test banks, made-up data)</option>
         </select>
       </label>
       {error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}

@@ -1,11 +1,13 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { SESSION_COOKIE, validSession } from "@/lib/auth";
+import { dbConfigured, readDoc, writeDoc } from "@/lib/db";
 
-// Server-side Plaid helpers. Plaid's keys come from one of two places:
+// Server-side Plaid helpers. Plaid's keys come from, in order:
 //   1. Vercel environment variables PLAID_CLIENT_ID, PLAID_SECRET and
-//      PLAID_ENV ("sandbox" or "production"), which win when set; or
-//   2. keys typed into the Financial Center, which the browser only ever holds
-//      sealed with a key derived from APP_PASSWORD and sends with each call.
+//      PLAID_ENV ("sandbox" or "production"), which win when set;
+//   2. keys typed into the Financial Center and saved, sealed with a key
+//      derived from APP_PASSWORD, in the online database for the whole site;
+//   3. older per-device keys the browser holds sealed and sends with each call.
 
 const HOSTS: Record<string, string> = {
   sandbox: "https://sandbox.plaid.com",
@@ -61,13 +63,44 @@ export function sealCreds(creds: PlaidCreds) {
   return encrypt(keysKey(), JSON.stringify(creds));
 }
 
-/** The keys for this request: Vercel's if set, otherwise the sealed keys the browser sent. */
-export function credsFrom(body: Record<string, unknown>): PlaidCreds {
+const SITE_KEYS_DOC = "plaid-keys";
+
+function openCreds(sealed: string): PlaidCreds {
+  const c = JSON.parse(decrypt(keysKey(), sealed)) as PlaidCreds;
+  return { clientId: c.clientId, secret: c.secret, env: pickEnv(c.env) };
+}
+
+/** The keys saved for the whole site, if any (null when the site password has changed since). */
+export async function siteCreds(): Promise<PlaidCreds | null> {
+  if (!dbConfigured()) return null;
+  const sealed = ((await readDoc(SITE_KEYS_DOC))?.data as { sealed?: string } | null)?.sealed;
+  if (!sealed) return null;
+  try {
+    return openCreds(sealed);
+  } catch {
+    return null;
+  }
+}
+
+/** Saves keys for the whole site, or removes them with null. False when there's no database. */
+export async function saveSiteCreds(creds: PlaidCreds | null) {
+  if (!dbConfigured()) return false;
+  const data = creds ? { sealed: sealCreds(creds), savedAt: new Date().toISOString() } : null;
+  for (let i = 0; i < 3; i++) {
+    const current = await readDoc(SITE_KEYS_DOC);
+    if ((await writeDoc(SITE_KEYS_DOC, current?.rev ?? 0, data)).ok) return true;
+  }
+  throw new PlaidError("Couldn't save the keys. Try again.", "SERVER_ERROR", 503);
+}
+
+/** The keys for this request: Vercel's if set, then the site's, then the sealed keys the browser sent. */
+export async function credsFrom(body: Record<string, unknown>): Promise<PlaidCreds> {
   if (envConfigured()) return { clientId: process.env.PLAID_CLIENT_ID!, secret: process.env.PLAID_SECRET!, env: envName() };
+  const site = await siteCreds();
+  if (site) return site;
   if (typeof body.keys !== "string") throw new PlaidError("Add your Plaid keys first.", "NOT_CONFIGURED", 503);
   try {
-    const c = JSON.parse(decrypt(keysKey(), body.keys)) as PlaidCreds;
-    return { clientId: c.clientId, secret: c.secret, env: pickEnv(c.env) };
+    return openCreds(body.keys);
   } catch {
     throw new PlaidError("Your saved Plaid keys no longer work. Enter them again.", "BAD_KEYS", 400);
   }
