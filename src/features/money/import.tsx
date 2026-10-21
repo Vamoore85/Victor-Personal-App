@@ -6,6 +6,7 @@ import { isCompany, type MoneyData, type Scope, type Transaction } from "./types
 import { BUSINESS_CATEGORY_NAMES, businessGuess, ruleCategory } from "./books";
 import { money } from "./calc";
 import { sameCharge } from "./plaid";
+import { readStatementPdf } from "./statement-pdf";
 import { Card, Field, buttonClass, ghostButtonClass, inputClass } from "./ui";
 
 /* Statement import: reads the CSV download every bank and card site offers. */
@@ -169,13 +170,54 @@ export function StatementImport({ data, scope }: { data: MoneyData; scope?: Scop
   const [accountId, setAccountId] = useState("");
   const [positiveIsSpending, setPositiveIsSpending] = useState<boolean | null>(null);
   const [message, setMessage] = useState("");
+  const [reading, setReading] = useState(false);
+  const [pdfNote, setPdfNote] = useState<{ ok: string[]; off: string[] } | null>(null);
 
   const accounts = scope ? data.accounts.filter((a) => (a.scope ?? "personal") === scope) : data.accounts;
   const account = accounts.find((a) => a.id === (accountId || accounts[0]?.id));
   const accountScope: Scope = account?.scope ?? "personal";
 
-  async function load(f: File) {
+  /** Bank statement PDFs: read every file, check each against its balances, and line them up as one table. */
+  async function loadPdfs(files: File[]) {
+    setReading(true);
+    const rows: string[][] = [];
+    const ok: string[] = [];
+    const off: string[] = [];
+    try {
+      for (const f of files) {
+        const st = await readStatementPdf(f);
+        const label = st.period || f.name;
+        if (st.txns.length === 0) off.push(`${f.name}: no transactions found`);
+        else (st.balanced ? ok : off).push(st.balanced ? label : `${label}: doesn't add up to the statement's balance, so check it`);
+        for (const t of st.txns) {
+          const [y, m, d] = t.date.split("-");
+          rows.push([`${m}/${d}/${y}`, t.description, (t.kind === "income" ? t.amount : -t.amount).toFixed(2)]);
+        }
+      }
+    } catch {
+      setMessage("Couldn't read that PDF. If it's a scan or photo, download the statement from your bank's website instead.");
+      setReading(false);
+      return;
+    }
+    setReading(false);
+    if (rows.length === 0) {
+      setMessage("No transactions found in those PDFs.");
+      return;
+    }
+    rows.sort((a, b) => parseDate(a[0])!.localeCompare(parseDate(b[0])!));
+    const headers = ["Date", "Description", "Amount"];
+    setFile({ name: files.length === 1 ? files[0].name : `${files.length} statements`, headers, rows });
+    setMap(guessMapping(headers));
+    setPositiveIsSpending(false);
+    setPdfNote({ ok: ok.sort(), off });
+  }
+
+  async function load(files: File[]) {
     setMessage("");
+    setPdfNote(null);
+    const pdfs = files.filter((f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name));
+    if (pdfs.length) return loadPdfs(pdfs);
+    const f = files[0];
     const all = parseCsv(await f.text());
     // Some banks put a few summary lines above the real header row.
     const headerAt = all.findIndex((r) => r.some((c) => /date/i.test(c)) && r.length >= 3);
@@ -250,29 +292,36 @@ export function StatementImport({ data, scope }: { data: MoneyData; scope?: Scop
             ))}
           </select>
         </Field>
-        <Field label="Statement file (.csv)">
+        <Field label="Statement files (PDF or CSV)">
           <input
             className={inputClass}
             type="file"
             // No type filter: phones often grey out a downloaded .csv when the picker asks for one.
+            multiple
+            disabled={reading}
             onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) load(f);
+              const files = [...(e.target.files ?? [])];
+              if (files.length) void load(files);
               e.target.value = "";
             }}
           />
         </Field>
       </div>
       <p className="mt-2 text-xs text-zinc-500">
-        On your bank or card website, open the account&apos;s activity and choose Download or Export as CSV. Rows already
-        imported are skipped, so overlapping statements are fine.
+        Pick your bank&apos;s statement PDFs (several months at once is fine), or a CSV download of the account&apos;s activity.
+        Transactions already here are skipped, so overlapping statements are fine.
       </p>
+      {reading && <p className="mt-3 text-sm text-zinc-500">Reading statements…</p>}
 
       {file && map && built && (
         <div className="mt-5 flex flex-col gap-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
           <p className="text-sm">
-            <span className="font-medium">{file.name}</span>: check the columns, then import.
+            <span className="font-medium">{file.name}</span>: {pdfNote ? "check the list, then import." : "check the columns, then import."}
           </p>
+          {pdfNote && pdfNote.ok.length > 0 && (
+            <p className="text-xs text-emerald-700 dark:text-emerald-400">✓ Matches the bank&apos;s balances: {pdfNote.ok.join(", ")}</p>
+          )}
+          {pdfNote && pdfNote.off.length > 0 && <p className="text-xs text-rose-600 dark:text-rose-400">{pdfNote.off.join(" · ")}</p>}
           <div className="grid gap-3 sm:grid-cols-3">
             {columnSelect("Date", "date", false)}
             {columnSelect("Description", "description")}
