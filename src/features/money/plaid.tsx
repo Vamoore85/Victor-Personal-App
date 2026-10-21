@@ -6,7 +6,7 @@ import { useDefaultScope, ScopeBadge } from "./scope";
 import { isCompany, type Account, type AccountType, type BankLink, type MoneyData, type Transaction } from "./types";
 import { isLiability } from "./calc";
 import { Card, Empty, buttonClass, ghostButtonClass } from "./ui";
-import { businessCategoryFor, ruleCategory } from "./books";
+import { autoCategory, ruleCategory } from "./books";
 
 /*
  * Connect banks and cards through Plaid. Plaid Link (Plaid's own sign-in
@@ -173,6 +173,7 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
   for (const pt of changed.values()) {
     const accountId = idFor.get(pt.accountId);
     if (!accountId || pt.pending) continue;
+    const acctScope = accounts.find((a) => a.id === accountId)?.scope ?? scope; // you may have moved the account since connecting
     const income = pt.amount < 0; // Plaid: positive is money leaving the account
     const prev = kept.get(pt.id);
     incoming.push({
@@ -184,8 +185,9 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
       // Keep a category already set; otherwise a learned rule, then Plaid's guess.
       category:
         prev?.category ??
-        ruleCategory(d.rules, pt.name, scope) ??
-        (isCompany(scope) ? businessCategoryFor(pt.category, income) : categoryFor(pt.category, income)),
+        (isCompany(acctScope)
+          ? autoCategory(d.rules, pt.name, acctScope, income, pt.category)
+          : (ruleCategory(d.rules, pt.name, acctScope) ?? categoryFor(pt.category, income))),
       categoryLocked: prev?.categoryLocked,
       accountId,
       transferId: prev?.transferId,

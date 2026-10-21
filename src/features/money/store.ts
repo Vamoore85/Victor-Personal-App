@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { autoSort } from "./books";
 import { EMPTY_DATA, type MoneyData } from "./types";
 
 // Money data is saved in the app's database (/api/money) so every device sees
@@ -65,7 +66,7 @@ function save(next: MoneyData) {
 }
 
 export function setMoneyData(update: (prev: MoneyData) => MoneyData) {
-  save(update(read()));
+  save(autoSort(update(read())));
   schedulePush();
 }
 
@@ -136,9 +137,12 @@ async function startCloud() {
     }
     // The database is the source of truth.
     setRev(json.rev);
-    save(normalize(json.data));
+    const fromDb = normalize(json.data);
+    const sorted = autoSort(fromDb);
+    save(sorted);
     dirty = false;
     setCloud("saved");
+    if (sorted !== fromDb) schedulePush(); // save the newly sorted categories back
   } catch {
     started = false; // retry on the next change
     loaded = false;

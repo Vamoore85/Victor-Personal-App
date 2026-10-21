@@ -1,4 +1,4 @@
-import { taxFormOf, type CategoryRule, type Company, type MoneyData, type Scope, type TaxForm, type Transaction } from "./types";
+import { DEFAULT_CATEGORIES, isCompany, taxFormOf, type CategoryRule, type Company, type MoneyData, type Scope, type TaxForm, type Transaction } from "./types";
 
 /*
  * Bookkeeping for Maverick, a one-owner LLC that files on Schedule C.
@@ -330,4 +330,43 @@ export function booksCsv(data: MoneyData, period: Period, company: Company = "bu
     ].map(csvCell).join(",");
   });
   return [header.join(","), ...lines].join("\n");
+}
+
+/* ---------------- Auto-sorting ---------------- */
+
+const BUSINESS_NAMES = new Set(BUSINESS_CATEGORY_NAMES);
+const PERSONAL_NAMES = new Set<string>(DEFAULT_CATEGORIES);
+
+/** A company transaction's category from what we know: a learned rule, its description, then Plaid's own category. */
+export function autoCategory(rules: CategoryRule[], description: string, scope: Scope, income: boolean, plaidCategory = "") {
+  const ruled = ruleCategory(rules, description, scope);
+  if (ruled) return ruled;
+  const guess = businessGuess(description, income);
+  return guess === "Other business expenses" && plaidCategory ? businessCategoryFor(plaidCategory, income) : guess;
+}
+
+/**
+ * Keeps every transaction in a category that fits its account's books: a
+ * company transaction still sitting in a personal or catch-all category is
+ * sorted again, and one moved to personal drops its business category.
+ * Categories you picked by hand are never touched.
+ */
+export function autoSort(d: MoneyData): MoneyData {
+  const scopes = new Map(d.accounts.map((a) => [a.id, a.scope ?? "personal"]));
+  let changed = false;
+  const transactions = d.transactions.map((t) => {
+    if (t.categoryLocked || t.transferId || t.category === "Transfer") return t;
+    const scope = scopes.get(t.accountId) ?? "personal";
+    const income = t.kind === "income";
+    let category = t.category;
+    if (isCompany(scope)) {
+      if (!BUSINESS_NAMES.has(t.category) || t.category === "Other business expenses") category = autoCategory(d.rules, t.description, scope, income);
+    } else if (BUSINESS_NAMES.has(t.category) && !PERSONAL_NAMES.has(t.category)) {
+      category = ruleCategory(d.rules, t.description, scope) ?? (income ? "Other income" : "Other");
+    }
+    if (category === t.category) return t;
+    changed = true;
+    return { ...t, category };
+  });
+  return changed ? { ...d, transactions } : d;
 }
