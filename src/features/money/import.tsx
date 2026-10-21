@@ -254,7 +254,7 @@ export function StatementImport({ data, scope }: { data: MoneyData; scope?: Scop
           <input
             className={inputClass}
             type="file"
-            accept=".csv,text/csv"
+            // No type filter: phones often grey out a downloaded .csv when the picker asks for one.
             onChange={(e) => {
               const f = e.target.files?.[0];
               if (f) load(f);
