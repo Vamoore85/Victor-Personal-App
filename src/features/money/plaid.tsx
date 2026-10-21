@@ -141,6 +141,12 @@ export function categoryFor(plaidCategory: string, income: boolean) {
   }
 }
 
+/** The same money movement seen twice, for example on an imported statement and in the bank feed. */
+export function sameCharge(t: Transaction, date: string, amount: number, kind: Transaction["kind"]) {
+  const days = Math.abs(new Date(t.date).getTime() - new Date(date).getTime()) / 86_400_000;
+  return t.kind === kind && Math.abs(t.amount - amount) < 0.005 && days <= 3;
+}
+
 const signed = (t: Transaction) => (t.kind === "income" ? t.amount : -t.amount);
 
 /** Folds one sync result into the money data. Pending transactions wait until they post. */
@@ -170,12 +176,18 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
   const kept = new Map(d.transactions.filter((t) => t.plaidId && changed.has(t.plaidId)).map((t) => [t.plaidId!, t]));
   const incoming: Transaction[] = [];
   const scope = link.scope ?? "personal";
+  const claimed = new Set<string>(); // statement rows that turned out to be this same bank transaction
   for (const pt of changed.values()) {
     const accountId = idFor.get(pt.accountId);
     if (!accountId || pt.pending) continue;
     const acctScope = accounts.find((a) => a.id === accountId)?.scope ?? scope; // you may have moved the account since connecting
     const income = pt.amount < 0; // Plaid: positive is money leaving the account
-    const prev = kept.get(pt.id);
+    const prev =
+      kept.get(pt.id) ??
+      existing.find(
+        (t) => !t.plaidId && !claimed.has(t.id) && t.accountId === accountId && sameCharge(t, pt.date, Math.abs(pt.amount), income ? "income" : "expense"),
+      );
+    if (prev && !prev.plaidId) claimed.add(prev.id);
     incoming.push({
       id: prev?.id ?? newId(),
       date: pt.date,
@@ -194,7 +206,7 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
       plaidId: pt.id,
     });
   }
-  const transactions = [...existing, ...incoming];
+  const transactions = [...existing.filter((t) => !claimed.has(t.id)), ...incoming];
 
   // Set each account's starting balance so its balance matches the bank's.
   const balanced = accounts.map((a): Account => {

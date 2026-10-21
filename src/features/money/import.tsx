@@ -5,6 +5,7 @@ import { newId, setMoneyData } from "./store";
 import { isCompany, type MoneyData, type Scope, type Transaction } from "./types";
 import { BUSINESS_CATEGORY_NAMES, businessGuess, ruleCategory } from "./books";
 import { money } from "./calc";
+import { sameCharge } from "./plaid";
 import { Card, Field, buttonClass, ghostButtonClass, inputClass } from "./ui";
 
 /* Statement import: reads the CSV download every bank and card site offers. */
@@ -205,7 +206,14 @@ export function StatementImport({ data, scope }: { data: MoneyData; scope?: Scop
       .filter((t) => t.accountId === account?.id)
       .map((t) => `${t.date}|${t.amount.toFixed(2)}|${t.kind}|${t.description.toLowerCase()}`),
   );
-  const fresh = built?.rows.filter((r) => !existing.has(`${r.date}|${r.amount.toFixed(2)}|${r.kind}|${r.description.toLowerCase()}`)) ?? [];
+  // Bank-feed transactions describe things differently, so match those on date and amount.
+  const fed = data.transactions.filter((t) => t.accountId === account?.id && t.plaidId);
+  const fresh =
+    built?.rows.filter(
+      (r) =>
+        !existing.has(`${r.date}|${r.amount.toFixed(2)}|${r.kind}|${r.description.toLowerCase()}`) &&
+        !fed.some((t) => sameCharge(t, r.date, r.amount, r.kind)),
+    ) ?? [];
   const dupes = (built?.rows.length ?? 0) - fresh.length;
 
   function commit() {
