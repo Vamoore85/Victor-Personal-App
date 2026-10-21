@@ -200,6 +200,7 @@ export type TaxDoc = {
   year: number; // the tax year it's for
   kind: string;
   scope?: Scope;
+  alsoScopes?: Scope[]; // a combined file, e.g. your 1040 with Maverick's Schedule C, or all three returns in one PDF
   note: string;
   contentType: string;
   size: number;

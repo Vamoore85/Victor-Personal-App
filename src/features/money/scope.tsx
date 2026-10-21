@@ -43,7 +43,7 @@ export function filterByScope(data: MoneyData, view: ScopeView): MoneyData {
     // A bank shows wherever any of its accounts are, since one login can hold several books' accounts.
     bankLinks: data.bankLinks.filter((l) => inView(l) || accounts.some((a) => a.plaid?.linkId === l.id)),
     receipts: data.receipts.filter(inView),
-    taxDocs: data.taxDocs.filter(inView),
+    taxDocs: data.taxDocs.filter((d) => inView(d) || !!d.alsoScopes?.includes(view)),
   };
 }
 

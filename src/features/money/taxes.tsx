@@ -13,6 +13,15 @@ import { Card, Empty, Field, buttonClass, inputClass } from "./ui";
  */
 
 const PART_BYTES = 3 * 1024 * 1024;
+
+/** Who a document belongs to. Combined files show in each book they cover. */
+const WHOSE: { value: string; label: string; scope: Scope; also?: Scope[] }[] = [
+  ...SCOPES.map((s) => ({ value: s.value as string, label: s.label, scope: s.value })),
+  { value: "personal+business", label: "Personal + Maverick (combined)", scope: "personal", also: ["business"] },
+  { value: "personal+business+gladiator", label: "All three (combined)", scope: "personal", also: ["business", "gladiator"] },
+];
+const whoseValue = (d: { scope?: Scope; alsoScopes?: Scope[] }) => [d.scope ?? "personal", ...(d.alsoScopes ?? [])].join("+");
+const whoseOf = (value: string) => WHOSE.find((w) => w.value === value) ?? WHOSE[0];
 const MAX_BYTES = 60 * 1024 * 1024;
 const TYPES = new Set(["application/pdf", "image/jpeg", "image/png", "image/webp"]);
 
@@ -95,7 +104,7 @@ async function openDoc(d: TaxDoc, download: boolean) {
 
 export function Taxes({ data }: { data: MoneyData }) {
   const defaultScope = useDefaultScope();
-  const [scope, setScope] = useState<Scope | null>(null);
+  const [whose, setWhose] = useState<string | null>(null);
   const [kind, setKind] = useState<string | null>(null);
   const [year, setYear] = useState<number | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
@@ -118,7 +127,8 @@ export function Taxes({ data }: { data: MoneyData }) {
           name: file.name,
           year: year ?? guessYear(file.name),
           kind: kind ?? guessKind(file.name),
-          scope: scope ?? defaultScope,
+          scope: whoseOf(whose ?? defaultScope).scope,
+          alsoScopes: whoseOf(whose ?? defaultScope).also,
           note: "",
           addedAt: new Date().toISOString(),
         };
@@ -166,10 +176,10 @@ export function Taxes({ data }: { data: MoneyData }) {
         </p>
         <div className="grid gap-3 sm:grid-cols-4 sm:items-end">
           <Field label="Whose">
-            <select className={inputClass} value={scope ?? defaultScope} onChange={(e) => setScope(e.target.value as Scope)}>
-              {SCOPES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
+            <select className={inputClass} value={whose ?? defaultScope} onChange={(e) => setWhose(e.target.value)}>
+              {WHOSE.map((w) => (
+                <option key={w.value} value={w.value}>
+                  {w.label}
                 </option>
               ))}
             </select>
@@ -226,7 +236,11 @@ export function Taxes({ data }: { data: MoneyData }) {
                     <button className="max-w-full truncate text-left font-medium hover:underline" onClick={() => open(d, false)}>
                       {d.name}
                     </button>
-                    <ScopeBadge item={d} />
+                    {d.alsoScopes?.length ? (
+                      <span className="ml-2 rounded bg-ember/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-brand">Combined</span>
+                    ) : (
+                      <ScopeBadge item={d} />
+                    )}
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
                       <select aria-label="What it is" className={small} value={d.kind} onChange={(e) => update(d.id, { kind: e.target.value })}>
                         {TAX_DOC_KINDS.map((k) => (
@@ -242,10 +256,18 @@ export function Taxes({ data }: { data: MoneyData }) {
                           </option>
                         ))}
                       </select>
-                      <select aria-label="Whose" className={small} value={d.scope ?? "personal"} onChange={(e) => update(d.id, { scope: e.target.value as Scope })}>
-                        {SCOPES.map((s) => (
-                          <option key={s.value} value={s.value}>
-                            {s.label}
+                      <select
+                        aria-label="Whose"
+                        className={small}
+                        value={whoseValue(d)}
+                        onChange={(e) => {
+                          const w = whoseOf(e.target.value);
+                          update(d.id, { scope: w.scope, alsoScopes: w.also });
+                        }}
+                      >
+                        {WHOSE.map((w) => (
+                          <option key={w.value} value={w.value}>
+                            {w.label}
                           </option>
                         ))}
                       </select>
