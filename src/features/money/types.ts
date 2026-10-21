@@ -181,6 +181,32 @@ export type Receipt = {
   addedAt: string;
 };
 
+export const TAX_DOC_KINDS = [
+  "Tax return",
+  "W-2",
+  "1099",
+  "K-1",
+  "1098 (mortgage, student loan)",
+  "Estimated tax payment",
+  "IRS or state letter",
+  "Payroll report",
+  "Other",
+] as const;
+
+// A tax return or form. The file is stored on the server in `parts` pieces.
+export type TaxDoc = {
+  id: string;
+  name: string; // the file's name
+  year: number; // the tax year it's for
+  kind: string;
+  scope?: Scope;
+  note: string;
+  contentType: string;
+  size: number;
+  parts: number;
+  addedAt: string;
+};
+
 export type MoneyData = {
   version: 1;
   accounts: Account[];
@@ -191,6 +217,7 @@ export type MoneyData = {
   institutions: Institution[];
   bankLinks: BankLink[];
   receipts: Receipt[];
+  taxDocs: TaxDoc[];
 };
 
 export const EMPTY_DATA: MoneyData = {
@@ -203,4 +230,5 @@ export const EMPTY_DATA: MoneyData = {
   institutions: [],
   bankLinks: [],
   receipts: [],
+  taxDocs: [],
 };

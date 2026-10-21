@@ -16,6 +16,7 @@ import { Books } from "./books-ui";
 import { BUSINESS_CATEGORY_NAMES } from "./books";
 import { CommandCenter } from "./command-center";
 import { Receipts } from "./receipts";
+import { Taxes } from "./taxes";
 import { clearQuickBooksNotice, quickBooksNotice as readQuickBooksNotice } from "./quickbooks";
 import { COMPANIES, isCompany, type Company } from "./types";
 
@@ -27,6 +28,7 @@ const TABS = [
   { id: "budgets", label: "Budgets" },
   { id: "books", label: "Company books" },
   { id: "receipts", label: "Receipts" },
+  { id: "taxes", label: "Taxes" },
   { id: "institutions", label: "Maverick Vault" },
 ];
 
@@ -185,6 +187,7 @@ export function FinancialCenter() {
       {tab === "budgets" && <Budgets data={shown} categories={categories} />}
       {tab === "institutions" && <Institutions data={shown} />}
       {tab === "receipts" && <Receipts data={shown} />}
+      {tab === "taxes" && <Taxes data={shown} />}
       {tab === "books" && (
         <Books
           key={booksCompany ?? view}

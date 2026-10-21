@@ -36,6 +36,7 @@ function normalize(value: unknown): MoneyData {
     institutions: Array.isArray(v.institutions) ? v.institutions : [],
     bankLinks: Array.isArray(v.bankLinks) ? v.bankLinks : [],
     receipts: Array.isArray(v.receipts) ? v.receipts : [],
+    taxDocs: Array.isArray(v.taxDocs) ? v.taxDocs : [],
   };
 }
 
