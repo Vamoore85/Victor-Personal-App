@@ -40,7 +40,8 @@ export function filterByScope(data: MoneyData, view: ScopeView): MoneyData {
     budgets: data.budgets.filter(inView),
     bills: data.bills.filter(inView),
     institutions: data.institutions.filter(inView),
-    bankLinks: data.bankLinks.filter(inView),
+    // A bank shows wherever any of its accounts are, since one login can hold several books' accounts.
+    bankLinks: data.bankLinks.filter((l) => inView(l) || accounts.some((a) => a.plaid?.linkId === l.id)),
     receipts: data.receipts.filter(inView),
   };
 }

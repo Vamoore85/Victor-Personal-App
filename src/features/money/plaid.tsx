@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { setMoneyData, newId } from "./store";
-import { useDefaultScope, ScopeBadge } from "./scope";
-import { isCompany, type Account, type AccountType, type BankLink, type MoneyData, type Transaction } from "./types";
+import { useDefaultScope, ScopeBadge, SCOPES } from "./scope";
+import { isCompany, type Scope, type Account, type AccountType, type BankLink, type MoneyData, type Transaction } from "./types";
 import { isLiability } from "./calc";
 import { Card, Empty, buttonClass, ghostButtonClass } from "./ui";
 import { autoCategory, ruleCategory } from "./books";
@@ -344,6 +344,11 @@ export function BankLinks({ data }: { data: MoneyData }) {
     }
   }
 
+  /** Moves a connected account to Personal, Maverick or Gladiator; its transactions re-sort on save. */
+  function moveAccount(id: string, to: Scope) {
+    setMoneyData((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, scope: to } : a)) }));
+  }
+
   async function disconnect(link: BankLink) {
     const accounts = data.accounts.filter((a) => a.plaid?.linkId === link.id);
     const ok = confirm(
@@ -413,6 +418,30 @@ export function BankLinks({ data }: { data: MoneyData }) {
                     {accts.length} account{accts.length === 1 ? "" : "s"} · {busy === l.id ? "Syncing…" : timeAgo(l.lastSync)}
                   </p>
                   {l.error && <p className="mt-1 text-xs text-rose-600 dark:text-rose-400">{l.error}</p>}
+                  {accts.length > 0 && (
+                    <ul className="mt-2 flex flex-col gap-1.5">
+                      {accts.map((a) => (
+                        <li key={a.id} className="flex flex-wrap items-center gap-2 text-sm">
+                          <span className="min-w-0 truncate">
+                            {a.name}
+                            {a.last4 && <span className="text-zinc-500"> ··{a.last4}</span>}
+                          </span>
+                          <select
+                            aria-label={`Whose is ${a.name}`}
+                            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                            value={a.scope ?? "personal"}
+                            onChange={(e) => moveAccount(a.id, e.target.value as Scope)}
+                          >
+                            {SCOPES.map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   {l.error && (
