@@ -87,3 +87,17 @@ test("everyday spending repeats as monthly totals: food by category, a busy stor
   assert.ok(amazon);
   assert.equal(amazon.typical, 90);
 });
+
+test("the big monthly check from the personal account is rent, the smaller ones child support", () => {
+  const d = data([
+    ...months(1, 10, 1).map((day, i) => t("1111", day, 1900, `CHECK ${3000 + i}`, "Other")),
+    ...months(1, 10, 12).map((day, i) => t("1111", day, 350, `CHECK ${4000 + i}`, "Other")),
+  ]);
+  const rent = find(d, /^Rent$/);
+  assert.ok(rent);
+  assert.equal(rent.typical, 1900);
+  assert.equal(rent.nextExpected, "2026-11-01");
+  const cs = find(d, /Child support/);
+  assert.ok(cs);
+  assert.equal(cs.typical, 350);
+});

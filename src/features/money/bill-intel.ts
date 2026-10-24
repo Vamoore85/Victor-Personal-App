@@ -73,7 +73,8 @@ export function merchantKey(description: string) {
   return words.slice(0, 2).join(" ");
 }
 
-const NAMES: Record<string, string> = { BGE: "BG&E", "CHILD SUPPORT": "Child support", VERIZON: "Verizon" };
+const RENT_CHECK_MIN = 1500;
+const NAMES: Record<string, string> = { RENT: "Rent", BGE: "BG&E", "CHILD SUPPORT": "Child support", VERIZON: "Verizon" };
 export function displayName(key: string, sample: string) {
   if (NAMES[key]) return NAMES[key];
   const name = key || sample;
@@ -123,7 +124,7 @@ const CARD_PAYMENT = /\b(CRD PMT|CARD ?PAYMENT|CREDIT CARD|CC PMT|EPAYMENT|E-PAY
 export const isCardPayment = (t: Transaction) => t.category === "Debt payments" || CARD_PAYMENT.test(t.description);
 
 /** Bump when the rules below change, so saved scans are redone. */
-export const SCAN_RULES = 6;
+export const SCAN_RULES = 7;
 
 export function isCandidate(t: Transaction, direction: "out" | "in") {
   if (direction === "out" && t.kind === "expense" && t.amount > 0 && t.transferId !== "imported" && isCardPayment(t) && !/\b(REFUND|REVERSAL|RETURN)\b/i.test(t.description)) return true;
@@ -369,8 +370,9 @@ export function detectRecurring(d: MoneyData, today = todayYmd()) {
       if (!spend && !isCandidate(t, direction)) continue;
       let key = spend && !MONTHLY_TOTALS.some((m) => m.re.test(t.description)) ? `CAT ${t.category}` : groupKey(t);
       if (!key) continue;
-      // Your word (2026-10-24): checks from the personal account are child support.
-      if (direction === "out" && scope === "personal" && key.startsWith("CHECK ")) key = "CHILD SUPPORT";
+      // Your word (2026-10-24): checks from the personal account are rent (the big
+      // monthly one, about two thousand) and child support (the rest).
+      if (direction === "out" && scope === "personal" && key.startsWith("CHECK ")) key = t.amount >= RENT_CHECK_MIN ? "RENT" : "CHILD SUPPORT";
       const g = `${bucketOf(scope)}|${key}`;
       const group = groups.get(g) ?? { scope, key, txns: [] };
       group.txns.push(t);
