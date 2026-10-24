@@ -14,7 +14,7 @@ import type { Account, BankLink, MoneyData, Scope, Transaction } from "./types";
  * account name: an account is either assigned (by you) or "needs assignment".
  */
 
-export const ACCOUNT_RULES = 3;
+export const ACCOUNT_RULES = 4;
 
 /** Your name for an account if you gave one, else the bank's. */
 export const accountLabel = (a: { name: string; nickname?: string }) => a.nickname || a.name;
@@ -123,6 +123,8 @@ const CORRECTIONS: { version: number; match: (a: Account, d: MoneyData) => boole
   // Victor himself, 2026-10-24 20:52: "5443 Is Maverick" (replaces the version 1 note above) and "5249 is Personal".
   { version: 3, match: (a, d) => a.last4 === "5443" && a.type === "checking" && !liveFeed(a, d), entity: "business" },
   { version: 3, match: (a, d) => a.last4 === "5249" && a.type === "checking" && liveFeed(a, d), entity: "personal" },
+  // 2026-10-24: ··5249 confirmed Personal again, to be shown as "Personal Checking" with the bank's name beneath.
+  { version: 4, match: (a, d) => a.last4 === "5249" && a.type === "checking" && liveFeed(a, d), entity: "personal", nickname: "Personal Checking" },
 ];
 
 /**

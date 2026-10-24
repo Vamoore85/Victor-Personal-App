@@ -100,6 +100,8 @@ test("no account is put under Maverick by default; only clear choices and the ow
   // ··5249 is Personal by the owner's word.
   assert.equal(by("p5249").scope, "personal");
   assert.equal(by("p5249").needsEntity, undefined);
+  assert.equal(by("p5249").nickname, "Personal Checking");
+  assert.equal(by("p5249").name, "Account 5249");
   // No connection and no word from the owner: needs assignment.
   assert.equal(by("a5668").needsEntity, true);
   assert.equal(by("a6846").needsEntity, true);
@@ -125,7 +127,7 @@ test("a database that already filed ··5443 under Gladiator moves it to Maveric
   const old = { ...v2, accountRules: 2, accounts: v2.accounts.map((a) => (a.id === "a5443" ? { ...a, scope: "gladiator" as const } : a)) };
   const { data } = cleanAccounts(old);
   assert.equal(data.accounts.find((a) => a.id === "a5443")!.scope, "business");
-  assert.equal(data.accountRules, 3);
+  assert.equal(data.accountRules, 4);
 });
 
 test("the clean-up is safe to run again", () => {
@@ -199,5 +201,5 @@ test("a database already on rules version 1 gets the version 2 names without red
   const { data } = cleanAccounts(v1);
   assert.equal(data.accounts.find((a) => a.id === "g5105")!.nickname, "Gladiator Payroll");
   assert.equal(data.accounts.find((a) => a.id === "a5668")!.needsEntity, true);
-  assert.equal(data.accountRules, 3);
+  assert.equal(data.accountRules, 4);
 });
