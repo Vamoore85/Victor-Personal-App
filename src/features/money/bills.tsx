@@ -3,7 +3,9 @@
 import { useState, type FormEvent } from "react";
 import { newId, setMoneyData } from "./store";
 import { BILL_FREQUENCIES, type Bill, type BillFrequency, type MoneyData, type Scope } from "./types";
-import { ScopeBadge, ScopeField, useDefaultScope } from "./scope";
+import { useDefaultScope } from "./scope";
+import { BUCKETS, bucketOf } from "./bill-intel";
+import { BucketChip, BucketField } from "./bucket-ui";
 import {
   addDays,
   billDatesBetween,
@@ -28,10 +30,12 @@ function parseAmount(s: string) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+type Update = (fn: (d: MoneyData) => MoneyData) => void;
+
 /** Logs the payment as a transaction (when the bill has an account) and moves the bill to its next date. */
-export function markBillPaid(bill: Bill) {
+export function markBillPaid(bill: Bill, update: Update = setMoneyData) {
   const paidOn = bill.nextDue <= today() ? bill.nextDue : today();
-  setMoneyData((d) => {
+  update((d) => {
     const transactions = bill.accountId && d.accounts.some((a) => a.id === bill.accountId)
       ? [
           ...d.transactions,
@@ -71,13 +75,26 @@ function dueTone(ymd: string) {
   return "text-zinc-500";
 }
 
-/** Compact list used on the Overview. */
+/** Compact list used on the Overview, kept apart by owner: Personal / Maverick, then Gladiator. */
 export function UpcomingBills({ data, days }: { data: MoneyData; days: number }) {
   const until = addDays(today(), days);
   const items = data.bills.filter((b) => b.nextDue <= until).sort((a, b) => a.nextDue.localeCompare(b.nextDue));
   if (data.bills.length === 0) return <Empty>No bills yet.</Empty>;
   if (items.length === 0) return <Empty>Nothing due in the next {days} days.</Empty>;
-  return <BillRows items={items} />;
+  const groups = BUCKETS.map((b) => ({ ...b, items: items.filter((x) => bucketOf(x.scope) === b.id) })).filter((g) => g.items.length);
+  return (
+    <div className="flex flex-col gap-3">
+      {groups.map((g) => (
+        <div key={g.id}>
+          <p className="mb-1 flex items-center justify-between text-xs text-zinc-500">
+            <BucketChip bucket={g.id} />
+            <span className="tabular-nums">{money(g.items.reduce((s, b) => s + b.amount, 0))}</span>
+          </p>
+          <BillRows items={g.items} />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function BillRows({ items, onEdit }: { items: Bill[]; onEdit?: (bill: Bill) => void }) {
@@ -88,7 +105,6 @@ function BillRows({ items, onEdit }: { items: Bill[]; onEdit?: (bill: Bill) => v
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">
               <BillName bill={b} />
-              <ScopeBadge item={b} />
               {b.autopay && (
                 <span className="ml-2 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-500 dark:bg-zinc-800">
                   Autopay
@@ -142,8 +158,25 @@ const blankDraft = (scope: Scope = "personal"): Draft => ({
   scope,
 });
 
-export function Bills({ data, categories }: { data: MoneyData; categories: string[] }) {
-  const defaultScope = useDefaultScope();
+/**
+ * The bill ledger: every bill you pay, added by hand or confirmed from a bank
+ * scan. `data` is already narrowed to one owner (or both, side by side).
+ */
+export function BillLedger({
+  data,
+  categories,
+  update,
+  onOpen,
+  defaultScope: scopeFor,
+}: {
+  data: MoneyData;
+  categories: string[];
+  update: Update;
+  onOpen: (billId: string) => void;
+  defaultScope?: Scope;
+}) {
+  const viewScope = useDefaultScope();
+  const defaultScope = scopeFor ?? viewScope;
   const [draft, setDraft] = useState<Draft>(() => blankDraft(defaultScope));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [month, setMonth] = useState(currentMonth());
@@ -166,7 +199,7 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
       institutionId: draft.institutionId,
       scope: draft.scope,
     };
-    setMoneyData((d) => ({
+    update((d) => ({
       ...d,
       bills: editingId
         ? d.bills.map((b) => (b.id === editingId ? { ...b, ...fields } : b))
@@ -195,7 +228,12 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
 
   function remove() {
     if (!editingId || !confirm("Delete this bill?")) return;
-    setMoneyData((d) => ({ ...d, bills: d.bills.filter((b) => b.id !== editingId) }));
+    update((d) => ({
+      ...d,
+      bills: d.bills.filter((b) => b.id !== editingId),
+      // A bill confirmed from a scan goes back to the review list.
+      recurring: d.recurring.map((f) => (f.billId === editingId ? { ...f, status: "review" as const, billId: undefined } : f)),
+    }));
     setDraft(blankDraft(defaultScope));
     setEditingId(null);
   }
@@ -223,7 +261,7 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
         </div>
       )}
 
-      <BillsChart data={data} onEdit={edit} onPaid={markBillPaid} />
+      <BillsChart data={data} onEdit={edit} onPaid={(b) => markBillPaid(b, update)} onOpen={onOpen} />
 
       <div id="bill-form" className="scroll-mt-4">
       <Card title={editingId ? "Edit bill" : "Add a bill"}>
@@ -266,7 +304,7 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
               ))}
             </select>
           </Field>
-          <ScopeField value={draft.scope} onChange={(v) => set("scope", v)} />
+          <BucketField value={draft.scope} onChange={(v) => set("scope", v)} />
           <div className="sm:col-span-3">
             <Field label="Where to pay it (link)">
               <input className={inputClass} inputMode="url" value={draft.url} onChange={(e) => set("url", e.target.value)} placeholder="https://www.duke-energy.com/pay" />
@@ -300,7 +338,7 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
 
       <Card
         title={`What comes out in ${monthLabel(month)}`}
-        action={<div className="w-44 shrink-0"><input type="month" className={inputClass} value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} /></div>}
+        action={<div className="w-40 shrink-0"><input type="month" className={inputClass} value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} /></div>}
       >
         {calendar.length === 0 ? (
           <Empty>No bills scheduled this month.</Empty>
@@ -311,11 +349,12 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
               {calendar.map(({ date, paid, bill }) => (
                 <li key={`${bill.id}-${date}`} className={`flex items-center justify-between gap-3 py-2 ${paid ? "opacity-50" : ""}`}>
                   <div className="flex min-w-0 items-center gap-3">
-                    <span className="w-24 shrink-0 text-sm tabular-nums text-zinc-500">{shortDate(date)}</span>
-                    <span className="truncate text-sm">
-                      <BillName bill={bill} />
+                    <span className="w-16 shrink-0 text-sm tabular-nums text-zinc-500 sm:w-24">{shortDate(date)}</span>
+                    <button className="min-w-0 truncate text-left text-sm hover:underline" onClick={() => onOpen(bill.id)}>
+                      {bill.name}
                       {bill.accountId && <span className="text-zinc-400"> · {accountNames.get(bill.accountId)}</span>}
-                    </span>
+                    </button>
+                    <BucketChip scope={bill.scope} />
                   </div>
                   <span className="shrink-0 text-sm tabular-nums">
                     {paid && <span className="mr-2 text-xs text-emerald-600 dark:text-emerald-400">Paid</span>}

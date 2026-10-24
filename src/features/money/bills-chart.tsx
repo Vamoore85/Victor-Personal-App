@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { billMonthlyCost, dueLabel, frequencyLabel, money, shortDate, daysUntil } from "./calc";
-import { ScopeBadge } from "./scope";
+import { BucketChip } from "./bucket-ui";
 import type { Bill, Institution, MoneyData } from "./types";
 import { useVault, type VaultEntry } from "./vault";
 import { CopyButton, VaultBar } from "./vault-ui";
@@ -37,7 +37,17 @@ function csvCell(v: string) {
   return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 
-export function BillsChart({ data, onEdit, onPaid }: { data: MoneyData; onEdit: (bill: Bill) => void; onPaid: (bill: Bill) => void }) {
+export function BillsChart({
+  data,
+  onEdit,
+  onPaid,
+  onOpen,
+}: {
+  data: MoneyData;
+  onEdit: (bill: Bill) => void;
+  onPaid: (bill: Bill) => void;
+  onOpen?: (billId: string) => void;
+}) {
   const vault = useVault();
   const [revealed, setRevealed] = useState<string | null>(null);
   const unlocked = vault.status === "unlocked";
@@ -97,7 +107,48 @@ export function BillsChart({ data, onEdit, onPaid }: { data: MoneyData; onEdit: 
           <Empty>No bills yet. Add rent, utilities, phone, insurance, subscriptions and so on below, and each shows up here with where to pay and its login.</Empty>
         ) : (
           <>
-            <div className="-mx-5 overflow-x-auto px-5">
+            {/* Phone: one compact row per bill. */}
+            <ul className="divide-y divide-zinc-200 md:hidden dark:divide-zinc-800">
+              {rows.map(({ bill, company, logins, payAt }) => (
+                <li key={bill.id} className="flex flex-col gap-1 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <button className="min-w-0 truncate text-left text-sm font-medium" onClick={() => (onOpen ? onOpen(bill.id) : onEdit(bill))}>
+                      {bill.name}
+                    </button>
+                    <BucketChip scope={bill.scope} />
+                    <span className="ml-auto shrink-0 text-sm font-medium tabular-nums">{money(bill.amount)}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-zinc-500">
+                    <span className="truncate">
+                      {shortDate(bill.nextDue)} · <span className={dueTone(bill.nextDue)}>{dueLabel(bill.nextDue)}</span> · {frequencyLabel(bill)}
+                    </span>
+                    <span className="ml-auto flex shrink-0 items-center gap-3">
+                      {payAt && (
+                        <a href={payAt} target="_blank" rel="noopener noreferrer" className={linkClass}>
+                          Pay ↗
+                        </a>
+                      )}
+                      <button className="font-medium text-brand" onClick={() => onPaid(bill)}>
+                        Paid
+                      </button>
+                      <button onClick={() => onEdit(bill)}>Edit</button>
+                    </span>
+                  </div>
+                  {unlocked && logins[0] && (
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="truncate font-mono text-zinc-500">{logins[0].username || company?.name}</span>
+                      {logins[0].username && <CopyButton value={logins[0].username} label="Copy user" />}
+                      <CopyButton value={logins[0].password} label="Copy password" />
+                    </div>
+                  )}
+                </li>
+              ))}
+              <li className="flex justify-between py-2.5 text-sm font-medium">
+                <span>About per month</span>
+                <span className="tabular-nums">{money(monthly)}</span>
+              </li>
+            </ul>
+            <div className="-mx-3 hidden overflow-x-auto px-3 sm:-mx-4 sm:px-4 md:block">
               <table className="w-full min-w-[46rem] text-left text-sm">
                 <thead>
                   <tr className="border-b border-zinc-200 text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
@@ -114,9 +165,15 @@ export function BillsChart({ data, onEdit, onPaid }: { data: MoneyData; onEdit: 
                   {rows.map(({ bill, company, logins, payAt }) => (
                     <tr key={bill.id} className="align-top">
                       <td className="py-2.5 pr-3">
-                        <p className="font-medium">
-                          {bill.name}
-                          <ScopeBadge item={bill} />
+                        <p className="flex flex-wrap items-center gap-1.5 font-medium">
+                          {onOpen ? (
+                            <button className="text-left hover:underline" onClick={() => onOpen(bill.id)}>
+                              {bill.name}
+                            </button>
+                          ) : (
+                            bill.name
+                          )}
+                          <BucketChip scope={bill.scope} />
                         </p>
                         <p className="text-xs text-zinc-500">
                           {frequencyLabel(bill)}

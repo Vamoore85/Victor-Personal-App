@@ -74,6 +74,7 @@ export const POST = handle(async (body) => {
       type: a.type,
       subtype: a.subtype,
       current: a.balances.current,
+      available: a.balances.available,
     })),
     added: added.map(slim),
     modified: modified.map(slim),

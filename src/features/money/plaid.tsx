@@ -28,7 +28,7 @@ declare global {
   }
 }
 
-type SyncAccount = { id: string; name: string; mask: string | null; type: string; subtype: string | null; current: number | null };
+type SyncAccount = { id: string; name: string; mask: string | null; type: string; subtype: string | null; current: number | null; available?: number | null };
 type SyncTxn = { id: string; accountId: string; amount: number; date: string; name: string; pending: boolean; category: string };
 type SyncResult = { cursor: string; institution: string; accounts: SyncAccount[]; added: SyncTxn[]; modified: SyncTxn[]; removed: string[] };
 
@@ -214,7 +214,8 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
     if (!pa || pa.current === null) return a;
     const net = transactions.filter((t) => t.accountId === a.id).reduce((s, t) => s + signed(t), 0);
     const openingBalance = isLiability(a) ? pa.current + net : pa.current - net;
-    return { ...a, openingBalance: Math.round(openingBalance * 100) / 100 };
+    const bankBalance = { current: pa.current, available: pa.available ?? null, asOf: new Date().toISOString() };
+    return { ...a, openingBalance: Math.round(openingBalance * 100) / 100, bankBalance };
   });
 
   return {

@@ -37,6 +37,8 @@ function normalize(value: unknown): MoneyData {
     bankLinks: Array.isArray(v.bankLinks) ? v.bankLinks : [],
     receipts: Array.isArray(v.receipts) ? v.receipts : [],
     taxDocs: Array.isArray(v.taxDocs) ? v.taxDocs : [],
+    recurring: Array.isArray(v.recurring) ? v.recurring : [],
+    billScan: v.billScan && typeof v.billScan === "object" ? v.billScan : undefined,
   };
 }
 

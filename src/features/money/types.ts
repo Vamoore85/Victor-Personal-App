@@ -64,6 +64,9 @@ export type Account = {
   // Set when the account comes from a bank connected through Plaid. Its
   // balance and transactions are then kept up to date by syncing.
   plaid?: { linkId: string; accountId: string };
+  // The bank's own balance from the last sync. "available" is what can be
+  // spent right now (Plaid leaves it empty for some accounts).
+  bankBalance?: { current: number | null; available: number | null; asOf: string };
 };
 
 export type Transaction = {
@@ -112,6 +115,59 @@ export type Bill = {
   url?: string; // where the bill is paid (the biller's website or payment page)
   institutionId?: string; // the company that sends the bill
   scope?: Scope;
+  recurringId?: string; // the RecurringFinding it was confirmed from, when it came from a bank-history scan
+  note?: string;
+};
+
+/*
+ * Bill intelligence: what a scan of recent bank history found repeating.
+ * Findings are kept between scans so your decisions (confirm, dismiss, edits)
+ * stick; a new scan only refreshes the evidence. A confirmed outgoing finding
+ * becomes a Bill, and from then on the Bill is what you edit.
+ */
+export type RecurringCadence = "weekly" | "biweekly" | "monthly" | "quarterly" | "irregular";
+
+export type RecurringOccurrence = {
+  txnId: string;
+  date: string;
+  amount: number;
+  accountId: string;
+  source: "bank" | "statement"; // bank feed (Plaid) or imported statement / typed in
+};
+
+export type RecurringFinding = {
+  id: string;
+  key: string; // direction | merchant key | owner bucket: matches the same finding across scans
+  direction: "out" | "in"; // a bill or money coming in
+  merchant: string;
+  scope: Scope; // owner of the account it was seen on
+  cadence: RecurringCadence;
+  typical: number; // median amount
+  min: number;
+  max: number;
+  firstDate: string;
+  lastDate: string;
+  usualDay: number; // day of the month (monthly, quarterly) or weekday 0-6 (weekly, every 2 weeks)
+  nextExpected: string | null;
+  confidence: "high" | "medium" | "low";
+  reasons: string[]; // the evidence, in plain words
+  occurrences: RecurringOccurrence[];
+  accountIds: string[];
+  category: string;
+  status: "detected" | "review" | "confirmed" | "dismissed";
+  billId?: string; // the Bill made when an outgoing finding was confirmed
+  overrides?: { name?: string; scope?: Scope; cadence?: RecurringCadence; amount?: number; nextDate?: string; category?: string };
+  updatedAt: string;
+};
+
+export type BillScan = {
+  ranAt: string; // ISO time
+  windowStart: string; // YYYY-MM-DD, 120 days back
+  windowEnd: string;
+  scanned: number; // transactions in the window
+  bankFeed: number; // of those, from connected banks
+  statement: number; // from imported statements or typed in
+  found: number;
 };
 
 export const INSTITUTION_TYPES = [
@@ -219,6 +275,8 @@ export type MoneyData = {
   bankLinks: BankLink[];
   receipts: Receipt[];
   taxDocs: TaxDoc[];
+  recurring: RecurringFinding[];
+  billScan?: BillScan;
 };
 
 export const EMPTY_DATA: MoneyData = {
@@ -232,4 +290,5 @@ export const EMPTY_DATA: MoneyData = {
   bankLinks: [],
   receipts: [],
   taxDocs: [],
+  recurring: [],
 };

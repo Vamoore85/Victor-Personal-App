@@ -7,7 +7,7 @@ import { exportEncryptedVault, importEncryptedVault } from "./vault";
 import { DEFAULT_CATEGORIES } from "./types";
 import { categoriesInUse, today } from "./calc";
 import { Accounts, Budgets, Overview, Transactions } from "./sections";
-import { Bills } from "./bills";
+import { Bills } from "./bill-intel-ui";
 import { Institutions } from "./institutions";
 import { VaultAutoLock } from "./vault-ui";
 import { BankLinks, useAutoSync } from "./plaid";
@@ -191,7 +191,7 @@ export function FinancialCenter() {
         </>
       )}
       {tab === "transactions" && <Transactions data={shown} categories={categories} />}
-      {tab === "bills" && <Bills data={shown} categories={categories} />}
+      {tab === "bills" && <Bills data={shown} categories={categories} goTo={setTab} />}
       {tab === "budgets" && <Budgets data={shown} categories={categories} />}
       {tab === "institutions" && <Institutions data={shown} />}
       {tab === "receipts" && <Receipts data={shown} />}
