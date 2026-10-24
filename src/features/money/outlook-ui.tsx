@@ -257,7 +257,9 @@ function EntityPanel({
   useEffect(() => {
     if (needsConnection) loadPlaidScript().catch(() => {});
   }, [needsConnection]);
-  async function reconnect(otherLogin = false) {
+  // The main button signs in fresh (any bank login); the existing connection is offered second,
+  // because update mode can only ever reopen the login it was made with.
+  async function reconnect(otherLogin = true) {
     if (connecting) return;
     setConnectError("");
     setConnectNote("");
@@ -295,12 +297,12 @@ function EntityPanel({
         {needsConnection && (
           <div className="mt-2 flex flex-col gap-1" data-testid={`reconnect-${b.entity}`}>
             <button className="self-start rounded-full bg-brand px-4 py-1.5 text-sm font-medium text-on-brand disabled:opacity-60" onClick={() => void reconnect()} disabled={connecting}>
-              {step === "token" ? "Getting a secure link…" : step === "script" ? "Loading Plaid…" : step === "starting" ? "Starting Plaid…" : step === "open" ? "Finish in the Plaid window" : step === "finishing" ? "Bringing the account in…" : connectError ? "Try again" : `Add ${missing.length === 1 && missing[0].last4 ? `··${missing[0].last4}` : "account"} from your bank`}
+              {step === "token" ? "Getting a secure link…" : step === "script" ? "Loading Plaid…" : step === "starting" ? "Starting Plaid…" : step === "open" ? "Finish in the Plaid window" : step === "finishing" ? "Bringing the account in…" : connectError ? "Try again" : `Sign in to the bank login that has ${missing.length === 1 && missing[0].last4 ? `··${missing[0].last4}` : "this account"}`}
             </button>
             <p className="text-xs text-zinc-500">
-              Tick {missing.length === 1 && missing[0].last4 ? `the account ending ${missing[0].last4}` : "it"} when the bank lists your accounts. Not listed?{" "}
-              <button className="underline hover:text-zinc-900 dark:hover:text-zinc-100" onClick={() => void reconnect(true)} disabled={connecting}>
-                It&apos;s under a different bank login
+              Pick your bank, sign in with that login, and tick {missing.length === 1 && missing[0].last4 ? `the account ending ${missing[0].last4}` : "it"}. If the bank signs you in to another company by itself, use a private window.{" "}
+              <button className="underline hover:text-zinc-900 dark:hover:text-zinc-100" onClick={() => void reconnect(false)} disabled={connecting}>
+                Or add it from the bank connection you already have
               </button>
             </p>
             {connectNote && (
@@ -324,7 +326,7 @@ function EntityPanel({
         ) : b.accounts.length > 0 && (
           <ul className="mt-2 flex flex-col gap-1 text-xs text-zinc-500" data-testid={`accts-${b.entity}`}>
             {b.accounts.map((a, i) => (
-              <AccountRow key={i} a={a} onConnect={() => void reconnect()} />
+              <AccountRow key={i} a={a} onConnect={() => void reconnect(true)} />
             ))}
           </ul>
         )}
