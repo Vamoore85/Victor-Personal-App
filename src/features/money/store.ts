@@ -40,6 +40,7 @@ function normalize(value: unknown): MoneyData {
     recurring: Array.isArray(v.recurring) ? v.recurring : [],
     billScan: v.billScan && typeof v.billScan === "object" ? v.billScan : undefined,
     docImports: Array.isArray(v.docImports) ? v.docImports : [],
+    briefings: Array.isArray(v.briefings) ? v.briefings : [],
   };
 }
 

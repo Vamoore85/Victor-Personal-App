@@ -168,8 +168,8 @@ export function buildSample(today = todayYmd(), now = Date.now()): MoneyData {
     transactions: txns.sort((a, b) => a.date.localeCompare(b.date)),
     bills: manual,
     bankLinks: [
-      { id: "sample-link1", itemId: "sample", institution: "Sample Bank (demo)", link: "", cursor: "", lastSync: hoursAgo(2), scope: "personal" },
-      { id: "sample-link2", itemId: "sample", institution: "Sample Business Bank (demo)", link: "", cursor: "", lastSync: hoursAgo(1), scope: "gladiator" },
+      { id: "sample-link1", itemId: "sample", institution: "Sample Bank (demo)", link: "", cursor: "", lastSync: hoursAgo(2), scope: "personal", historyStatus: "HISTORICAL_UPDATE_COMPLETE" },
+      { id: "sample-link2", itemId: "sample", institution: "Sample Business Bank (demo)", link: "", cursor: "", lastSync: hoursAgo(1), scope: "gladiator", historyStatus: "HISTORICAL_UPDATE_COMPLETE" },
     ],
   };
   const { found, scan } = detectRecurring(d, today);

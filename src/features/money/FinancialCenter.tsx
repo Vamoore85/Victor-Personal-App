@@ -10,6 +10,7 @@ import { Accounts, Budgets, Overview, Transactions } from "./sections";
 import { Bills } from "./bill-intel-ui";
 import { Spending } from "./spending-ui";
 import { Documents } from "./documents-ui";
+import { BriefingView } from "./briefing-ui";
 import { Institutions } from "./institutions";
 import { VaultAutoLock } from "./vault-ui";
 import { BankLinks, useAutoSync } from "./plaid";
@@ -23,6 +24,7 @@ import { clearQuickBooksNotice, quickBooksNotice as readQuickBooksNotice } from 
 import { COMPANIES, isCompany, type Company } from "./types";
 
 const TABS = [
+  { id: "briefing", label: "Briefing" },
   { id: "overview", label: "Overview" },
   { id: "accounts", label: "Accounts" },
   { id: "transactions", label: "Transactions" },
@@ -36,13 +38,13 @@ const TABS = [
   { id: "institutions", label: "Maverick Vault" },
 ];
 
-const OWN_ENTITY = new Set(["bills", "spending"]);
+const OWN_ENTITY = new Set(["bills", "spending", "briefing"]);
 const entityFor = (v: ScopeView) => (v === "gladiator" ? ("gladiator" as const) : v === "all" ? undefined : ("pm" as const));
 
 export function FinancialCenter() {
   const data = useMoneyData();
   const cloud = useCloudState();
-  const [tab, setTab] = useState(() => (readQuickBooksNotice() ? "books" : "overview"));
+  const [chosenTab, setTab] = useState<string | null>(() => (readQuickBooksNotice() ? "books" : null));
   const [view, setView] = useState<ScopeView>(() => {
     try {
       const saved = typeof window !== "undefined" ? window.localStorage.getItem("maverick.money.view") : null;
@@ -62,6 +64,8 @@ export function FinancialCenter() {
   if (!data) {
     return <p className="text-sm text-zinc-500">Loading…</p>;
   }
+  // Once a bank is connected, Money opens on the finished briefing.
+  const tab = chosenTab ?? (data.bankLinks.length > 0 || data.briefings.length > 0 ? "briefing" : "overview");
 
   const personalCategories = categoriesInUse(filterByScope(data, "personal"), DEFAULT_CATEGORIES);
   const categories =
@@ -194,9 +198,10 @@ export function FinancialCenter() {
         ) : (
           <Overview data={shown} goTo={setTab} />
         ))}
+      {tab === "briefing" && <BriefingView data={data} goTo={setTab} />}
       {tab === "accounts" && (
         <>
-          <BankLinks data={shown} />
+          <BankLinks data={shown} onBriefing={() => setTab("briefing")} />
           <Accounts data={shown} />
         </>
       )}

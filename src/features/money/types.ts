@@ -304,6 +304,17 @@ export type MoneyData = {
   recurring: RecurringFinding[];
   billScan?: BillScan;
   docImports: DocImport[];
+  briefings: BriefingSnapshot[];
+};
+
+// A saved copy of the Financial Briefing, made after each bank sync.
+export type BriefingSnapshot = {
+  id: string;
+  at: string; // ISO time it was made
+  trigger: "first-sync" | "sync" | "manual";
+  freshness: "current" | "partial" | "stale" | "failed" | "no-bank";
+  owners: { bucket: "pm" | "gladiator"; available: number | null; ytdSpend: number; billsMonth: number; projected: number | null; flags: number }[];
+  text: string;
 };
 
 export const EMPTY_DATA: MoneyData = {
@@ -319,4 +330,5 @@ export const EMPTY_DATA: MoneyData = {
   taxDocs: [],
   recurring: [],
   docImports: [],
+  briefings: [],
 };

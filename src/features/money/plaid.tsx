@@ -7,6 +7,7 @@ import { isCompany, type Scope, type Account, type AccountType, type BankLink, t
 import { isLiability } from "./calc";
 import { Card, Empty, buttonClass, ghostButtonClass } from "./ui";
 import { autoCategory, ruleCategory } from "./books";
+import { HISTORY_DONE, saveBriefing } from "./briefing";
 
 /*
  * Connect banks and cards through Plaid. Plaid Link (Plaid's own sign-in
@@ -41,7 +42,7 @@ type SyncResult = {
   removed: string[];
 };
 
-export const HISTORY_DONE = "HISTORICAL_UPDATE_COMPLETE";
+export { HISTORY_DONE };
 
 const STALE_MS = 4 * 60 * 60 * 1000; // sync on open when the last sync is older than this
 
@@ -271,7 +272,7 @@ const latestCursor: Record<string, string> = {};
  * Brings a bank up to date. A big first sync comes in several calls; each one
  * is saved as it arrives. Returns Plaid's history status.
  */
-async function syncLink(link: BankLink): Promise<string | undefined> {
+async function syncLink(link: BankLink, trigger: "first-sync" | "sync" = "sync"): Promise<string | undefined> {
   let cursor = link.cursor;
   try {
     for (let round = 0; round < 12; round++) {
@@ -282,23 +283,28 @@ async function syncLink(link: BankLink): Promise<string | undefined> {
         const current = d.bankLinks.find((l) => l.id === link.id);
         return current ? applySync(d, current, r) : d;
       });
-      if (!r.hasMore) return r.updateStatus;
+      if (!r.hasMore) {
+        // A finished sync refreshes the saved Financial Briefing.
+        setMoneyData((d) => saveBriefing(d, trigger));
+        return r.updateStatus;
+      }
     }
   } catch (e) {
     const err = e as Error & { code?: string };
-    setMoneyData((d) => ({ ...d, bankLinks: d.bankLinks.map((l) => (l.id === link.id ? { ...l, error: err.message, errorCode: err.code } : l)) }));
+    // The saved briefing records the failure too, so it never reads as current.
+    setMoneyData((d) => saveBriefing({ ...d, bankLinks: d.bankLinks.map((l) => (l.id === link.id ? { ...l, error: err.message, errorCode: err.code } : l)) }, trigger));
   }
   return undefined;
 }
 
 /** Right after connecting, Plaid needs a little while to gather history. Check back a few times. */
 async function firstSync(link: BankLink, onWait: (n: number) => void) {
-  let status = await syncLink(link);
+  let status = await syncLink(link, "first-sync");
   for (let i = 0; i < 8 && (status === "NOT_READY" || status === undefined || status === ""); i++) {
     onWait(i + 1);
     await new Promise((res) => setTimeout(res, 5000));
     const current = { ...link, cursor: latestCursor[link.id] ?? link.cursor };
-    status = await syncLink(current);
+    status = await syncLink(current, "first-sync");
   }
   return status;
 }
@@ -326,11 +332,12 @@ export function useAutoSync(data: MoneyData | null) {
   }, [data]);
 }
 
-export function BankLinks({ data }: { data: MoneyData }) {
+export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: () => void }) {
   const defaultScope = useDefaultScope();
   const [owner, setOwner] = useState<Scope | "">("");
   const scope: Scope = owner || defaultScope;
   const [waiting, setWaiting] = useState("");
+  const [briefingReady, setBriefingReady] = useState(false);
   const [server, setServer] = useState<ServerKeys | null>(null);
   const [local, setLocal] = useState<SavedKeys | null>(null);
   const [editingKeys, setEditingKeys] = useState(false);
@@ -395,6 +402,7 @@ export function BankLinks({ data }: { data: MoneyData }) {
       setMoneyData((d) => ({ ...d, bankLinks: [...d.bankLinks, bank] }));
       setBusy(bank.id);
       const st = await firstSync(bank, (n) => setWaiting(`Plaid is gathering your history (check ${n} of 8)…`));
+      setBriefingReady(!!st && st !== "NOT_READY");
       setWaiting(
         st === HISTORY_DONE
           ? ""
@@ -510,6 +518,14 @@ export function BankLinks({ data }: { data: MoneyData }) {
       )}
       {message && <p className="mb-3 text-sm text-rose-600 dark:text-rose-400">{message}</p>}
       {waiting && <p className="mb-3 text-sm text-amber-700 dark:text-amber-400">{waiting}</p>}
+      {briefingReady && onBriefing && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm" data-testid="briefing-ready">
+          <span className="min-w-0 flex-1">Your bank is connected and your Financial Briefing is ready.</span>
+          <button className={buttonClass} onClick={onBriefing}>
+            Open your briefing
+          </button>
+        </div>
+      )}
       {data.bankLinks.length === 0 ? (
         <Empty>Connect your bank and card accounts to bring in balances and transactions automatically. You sign in to your bank inside Plaid&apos;s own window; Maverick never sees your bank password.</Empty>
       ) : (
