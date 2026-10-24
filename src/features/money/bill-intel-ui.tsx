@@ -48,7 +48,20 @@ type View = "briefing" | "recurring" | "ledger" | "accounts";
 
 type SampleState = { generatedOn: string; edited: boolean; data: MoneyData | null };
 const sampleStore = createLocalStore<SampleState>("maverick.bills-sample.v1", { generatedOn: "", edited: false, data: null });
-const modeStore = createLocalStore<{ mode: Mode | null }>("maverick.bills-mode.v1", { mode: null });
+// v2: the first version saved nothing useful and treated old hand-made bill rows as real data.
+const modeStore = createLocalStore<{ mode: Mode | null }>("maverick.bills-mode.v2", { mode: null });
+
+/**
+ * Whether your real data is enough for bill intelligence: bank or imported
+ * history from the last 120 days, or bills you've confirmed from a scan.
+ * Bills typed in by hand on their own don't count, so the sample opens first.
+ */
+export function realReadiness(d: MoneyData, t = today()) {
+  const from = addDays(t, -SCAN_DAYS);
+  const history = d.transactions.filter((x) => !x.transferId && x.date >= from && x.date <= t).length;
+  const confirmed = d.recurring.filter((f) => f.status === "confirmed").length + d.bills.filter((b) => b.recurringId).length;
+  return { history, confirmed, ready: history >= 10 || confirmed > 0 };
+}
 
 function resetSample() {
   sampleStore.set(() => ({ generatedOn: today(), edited: false, data: buildSample() }));
@@ -88,11 +101,11 @@ const ago = (iso: string | null) => {
 
 /* ---------------- Entry ---------------- */
 
-export function Bills({ data, categories, goTo }: { data: MoneyData; categories: string[]; goTo?: (tab: "accounts") => void }) {
+export function Bills({ data, categories, goTo }: { data: MoneyData; categories: string[]; goTo?: (tab: "accounts" | "books") => void }) {
   const sample = sampleStore.use();
   const saved = modeStore.use();
-  const hasReal = data.transactions.length > 0 || data.bills.length > 0;
-  const mode: Mode = saved?.mode ?? (hasReal ? "real" : "sample");
+  const readiness = realReadiness(data);
+  const mode: Mode = saved?.mode ?? (readiness.ready ? "real" : "sample");
   const [owner, setOwner] = useState<OwnerView>("pm");
   const [view, setView] = useState<View>("briefing");
   const [open, setOpen] = useState<{ billId?: string; findingId?: string } | null>(null);
@@ -141,10 +154,17 @@ export function Bills({ data, categories, goTo }: { data: MoneyData; categories:
           <button className="font-medium underline" onClick={() => modeStore.set(() => ({ mode: "real" }))}>Use my data</button>
         </div>
       ) : (
-        !hasReal && (
-          <p className="rounded-lg border border-zinc-200 bg-surface px-3 py-2 text-sm text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">
-            No bills or bank history yet. Connect a bank on Accounts, import statements under Company books, or add bills by hand on the Bills view.
-          </p>
+        !readiness.ready && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-zinc-200 bg-surface px-3 py-2 text-sm dark:border-zinc-800" data-testid="real-empty">
+            <span className="min-w-0 basis-full font-medium sm:flex-1 sm:basis-0">No connected bank history or confirmed bills yet.</span>
+            <span className="basis-full text-zinc-500">
+              {data.bills.length > 0 ? `Your ${data.bills.length} hand-entered bill${data.bills.length === 1 ? " is" : "s are"} under Bills. ` : ""}
+              Briefings and the 120-day scan need bank or statement history.
+            </span>
+            <button className="font-medium text-brand underline" onClick={() => modeStore.set(() => ({ mode: "sample" }))}>View sample</button>
+            {goTo && <button className="underline" onClick={() => goTo("accounts")}>Connect a bank</button>}
+            {goTo && <button className="underline" onClick={() => goTo("books")}>Import statements</button>}
+          </div>
         )
       )}
 
