@@ -4,7 +4,7 @@ import { useState } from "react";
 import { confirmFinding, setFindingStatus } from "./bill-intel";
 import { BillDetail } from "./bill-intel-ui";
 import { money } from "./calc";
-import { CONFIDENCE_LABEL, STATUS_LABEL, cadenceWord, entityLabel, recurringRows, splitFinding, upcoming, total, type BillStatus, type RecurringRow } from "./outlook";
+import { CONFIDENCE_LABEL, STATUS_LABEL, cadenceWord, entityLabel, recurringRows, splitFinding, upcoming, total, type BillStatus, type RecurringRow, type UpcomingLine } from "./outlook";
 import { useBillScan } from "./outlook-ui";
 import { newId, setMoneyData } from "./store";
 import type { MoneyData, Scope } from "./types";
@@ -76,6 +76,8 @@ export function RecurringBills({ data, categories }: { data: MoneyData; categori
           </select>
         </div>
       </header>
+
+      <Next30 lines={lines} onOpen={setOpenId} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-start">
         {COLUMNS.map((e) => (
@@ -186,5 +188,59 @@ function BillRow({ r, onOpen }: { r: RecurringRow; onOpen: () => void }) {
         </button>
       </div>
     </li>
+  );
+}
+
+const ENTITY_TONE: Record<string, string> = {
+  business: "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200",
+  personal: "bg-sky-100 text-sky-900 dark:bg-sky-900/40 dark:text-sky-200",
+  gladiator: "bg-zinc-200 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200",
+};
+
+/** Every bill due in the next 30 days, all companies, in the order they come out. */
+function Next30({ lines, onOpen }: { lines: UpcomingLine[]; onOpen: (id: string) => void }) {
+  const sorted = [...lines].sort((a, b) => a.date.localeCompare(b.date) || b.amount - a.amount);
+  const sum = sorted.reduce((s, l) => s + l.amount, 0);
+  return (
+    <section className="rounded-2xl border border-zinc-200 bg-surface dark:border-zinc-800" data-testid="next-30">
+      <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-zinc-100 px-4 py-3 sm:px-5 dark:border-zinc-800">
+        <h3 className="text-2xl font-bold tracking-tight">Next 30 days</h3>
+        <p className="text-base text-zinc-500">
+          {sorted.length} bill{sorted.length === 1 ? "" : "s"} · <span className="text-xl font-semibold text-zinc-900 tabular-nums dark:text-zinc-100">{money(sum)}</span>
+        </p>
+      </header>
+      {sorted.length === 0 ? (
+        <p className="px-4 py-4 text-base text-zinc-500 sm:px-5">No bills expected in the next 30 days.</p>
+      ) : (
+        <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          {sorted.map((l) => {
+            const d = new Date(`${l.date}T12:00:00`);
+            return (
+              <li key={l.key}>
+                <button
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-zinc-50 sm:gap-4 sm:px-5 dark:hover:bg-zinc-900"
+                  onClick={() => l.findingId && onOpen(l.findingId)}
+                  disabled={!l.findingId}
+                >
+                  <span className="w-14 shrink-0">
+                    <span className="block text-base font-semibold">{d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                    <span className="block text-xs text-zinc-500">{d.toLocaleDateString("en-US", { weekday: "short" })}</span>
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-base font-medium">{l.name}</span>
+                    <span className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                      <span className={`rounded-full px-2 py-0.5 font-medium ${ENTITY_TONE[l.entity] ?? ENTITY_TONE.gladiator}`}>{entityLabel(l.entity)}</span>
+                      {l.account && <span className="truncate">{l.account}</span>}
+                      {l.predicted && <span>expected</span>}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-lg font-semibold tabular-nums">{money(l.amount)}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
