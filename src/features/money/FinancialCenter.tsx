@@ -32,8 +32,8 @@ import { COMPANIES, isCompany, type Company } from "./types";
 // Four views on top, all three entities together. Everything else is under Details.
 const MAIN = [
   { id: "overview", label: "Overview" },
-  { id: "spending", label: "Spending" },
   { id: "bills", label: "Bills" },
+  { id: "spending", label: "Spending" },
   { id: "accounts", label: "Accounts" },
 ];
 
