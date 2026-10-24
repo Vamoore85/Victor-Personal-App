@@ -86,6 +86,7 @@ export function displayName(key: string, sample: string) {
 /* ---------------- What isn't a bill ---------------- */
 
 const NOT_BILL_CATEGORIES = new Set(["Transfer", "Owner draw", "Owner contribution", "Sales tax collected", "Dining", "Groceries", "Business meals"]);
+const SPEND_CATEGORIES = new Set(["Dining", "Groceries", "Business meals"]);
 const NOT_INCOME_CATEGORIES = new Set(["Transfer", "Owner draw", "Owner contribution", "Sales tax collected"]);
 const MOVEMENT = /\b(XFER|TRANSFER|ZELLE|VENMO|CASH ?APP|ATM|CASH WITHDRAWAL|WITHDRAWAL|DEPOSIT(ED)?|OVERDRAFT|NSF|REFUND|REVERSAL|RETURN|INTEREST PAID|FLASH FUNDS)\b|^RETURN-/i;
 
@@ -122,7 +123,7 @@ const CARD_PAYMENT = /\b(CRD PMT|CARD ?PAYMENT|CREDIT CARD|CC PMT|EPAYMENT|E-PAY
 export const isCardPayment = (t: Transaction) => t.category === "Debt payments" || CARD_PAYMENT.test(t.description);
 
 /** Bump when the rules below change, so saved scans are redone. */
-export const SCAN_RULES = 5;
+export const SCAN_RULES = 6;
 
 export function isCandidate(t: Transaction, direction: "out" | "in") {
   if (direction === "out" && t.kind === "expense" && t.amount > 0 && t.transferId !== "imported" && isCardPayment(t) && !/\b(REFUND|REVERSAL|RETURN)\b/i.test(t.description)) return true;
@@ -171,6 +172,7 @@ const RANK = { low: 1, medium: 2, high: 3 } as const;
  */
 function analyse(key: string, direction: "out" | "in", scope: Scope, txns: Transaction[], today: string, dataEnd = today): Detected | null {
   if (direction === "out" && totalFor(key)) return analyseMonthly(key, scope, txns, today);
+  if (direction === "out" && key.startsWith("CAT ")) return analyseMonthly(key, scope, txns, today, `${key.slice(4)} (monthly total)`, 3);
   const full = analyseOnce(key, direction, scope, txns, today, dataEnd);
   if (full?.confidence === "high") return full;
   const typical = median(txns.map((t) => t.amount));
@@ -210,7 +212,8 @@ function analyseOnce(key: string, direction: "out" | "in", scope: Scope, txns: T
   const gaps = dates.slice(1).map((d, i) => dayNum(d) - dayNum(dates[i]));
   const gap = median(gaps);
   const span = dayNum(dates[n - 1]) - dayNum(dates[0]);
-  if (gap < 5 || (span > 0 && (n / span) * 30 > 6)) return null; // everyday spending, not a bill
+  // Everyday spending at one place (many charges a month): one monthly total for the budget.
+  if (gap < 5 || (span > 0 && (n / span) * 30 > 6)) return direction === "out" ? analyseMonthly(key, scope, txns, today, undefined, 3) : null;
 
   const typical = round2(median(amounts));
   const min = Math.min(...amounts);
@@ -309,12 +312,12 @@ function seenOnce(key: string, scope: Scope, txns: Transaction[], today: string)
 }
 
 /** Many small charges (Apple, gas) as one monthly amount: the usual month's total, due on the 1st. */
-function analyseMonthly(key: string, scope: Scope, txns: Transaction[], today: string): Detected | null {
+function analyseMonthly(key: string, scope: Scope, txns: Transaction[], today: string, name?: string, minMonths = 2): Detected | null {
   const thisMonth = today.slice(0, 7);
   const byMonth = new Map<string, number>();
   for (const t of txns) if (t.date.slice(0, 7) < thisMonth) byMonth.set(t.date.slice(0, 7), round2((byMonth.get(t.date.slice(0, 7)) ?? 0) + t.amount));
   const months = [...byMonth.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-12);
-  if (months.length < 2) return null;
+  if (months.length < minMonths) return null;
   const totals = months.map(([, v]) => v);
   const typical = round2(median(totals));
   const dates = txns.map((t) => t.date).sort();
@@ -323,7 +326,7 @@ function analyseMonthly(key: string, scope: Scope, txns: Transaction[], today: s
   return {
     key: `out|${key}|${bucketOf(scope)}`,
     direction: "out",
-    merchant: totalFor(key)!.name,
+    merchant: name ?? totalFor(key)?.name ?? `${displayName(key, txns[0].description)} (monthly total)`,
     scope,
     cadence: "monthly",
     typical,
@@ -359,9 +362,12 @@ export function detectRecurring(d: MoneyData, today = todayYmd()) {
   for (const direction of ["out", "in"] as const) {
     const groups = new Map<string, { scope: Scope; key: string; txns: Transaction[] }>();
     for (const t of inWindow) {
-      if (unassigned.has(t.accountId) || !isCandidate(t, direction)) continue;
+      if (unassigned.has(t.accountId)) continue;
       const scope = scopeOf.get(t.accountId) ?? "personal";
-      let key = groupKey(t);
+      // Food and groceries aren't bills, but they repeat every month: one budget line per category.
+      const spend = direction === "out" && t.kind === "expense" && !t.transferId && t.amount > 0 && SPEND_CATEGORIES.has(t.category) && !NOT_OUTGOING.test(t.description);
+      if (!spend && !isCandidate(t, direction)) continue;
+      let key = spend && !MONTHLY_TOTALS.some((m) => m.re.test(t.description)) ? `CAT ${t.category}` : groupKey(t);
       if (!key) continue;
       // Your word (2026-10-24): checks from the personal account are child support.
       if (direction === "out" && scope === "personal" && key.startsWith("CHECK ")) key = "CHILD SUPPORT";

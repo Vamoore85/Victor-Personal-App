@@ -74,3 +74,16 @@ test("checks from the personal account are child support, even when the amount c
   assert.equal(f.nextExpected, "2026-11-01");
   assert.equal(detectRecurring(d, TODAY).found.filter((x) => /^Check/.test(x.merchant)).length, 0);
 });
+
+test("everyday spending repeats as monthly totals: food by category, a busy store by name", () => {
+  const d = data([
+    ...months(4, 9, 1).flatMap((day) => [3, 9, 16, 23].map((dd) => t("1111", day.replace(/01$/, String(dd).padStart(2, "0")), 25, `DINER NUMBER ${dd}`, "Dining"))),
+    ...months(4, 9, 1).flatMap((day) => [2, 6, 11, 17, 22, 28].map((dd) => t("1111", day.replace(/01$/, String(dd).padStart(2, "0")), 15, "AMAZON MKTPL", "Shopping"))),
+  ]);
+  const dining = find(d, /^Dining \(monthly total\)$/);
+  assert.ok(dining);
+  assert.equal(dining.typical, 100);
+  const amazon = find(d, /Amazon Mktpl \(monthly total\)/);
+  assert.ok(amazon);
+  assert.equal(amazon.typical, 90);
+});
