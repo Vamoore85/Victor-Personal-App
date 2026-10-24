@@ -24,3 +24,19 @@ export async function updateMoney(change: (d: MoneyData) => MoneyData): Promise<
   }
   throw new Error("The money data kept changing while saving.");
 }
+
+/** One line per account for the hosting's logs: last 4, entity, type, bank feed and balance age. Never amounts or names. */
+export function accountDiag(data: unknown) {
+  const d = asMoney(data);
+  const links = new Map(d.bankLinks.map((l) => [l.id, l]));
+  return d.accounts
+    .map((a) => {
+      const link = a.plaid ? links.get(a.plaid.linkId) : undefined;
+      const bb = a.bankBalance;
+      const bal = !bb ? "none" : bb.current === null && bb.available === null ? "empty" : `${Math.round((Date.now() - new Date(bb.asOf).getTime()) / 36e5)}h`;
+      const bank = d.transactions.filter((t) => t.accountId === a.id && t.plaidId).length;
+      const other = d.transactions.filter((t) => t.accountId === a.id && !t.plaidId).length;
+      return `${a.last4 ?? "----"}/${a.scope ?? "personal"}/${a.type}/feed=${!a.plaid ? "none" : link ? "live" : "removed"}/bal=${bal}/tx=${bank}+${other}`;
+    })
+    .join(" ");
+}

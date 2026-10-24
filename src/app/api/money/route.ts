@@ -2,6 +2,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import { connection } from "next/server";
 import { databaseUrl, dbConfigured, readDoc, writeDoc } from "@/lib/db";
 import { applyPendingImport } from "@/lib/pending-import";
+import { accountDiag } from "@/lib/money-doc";
 import { sameOrigin, signedIn } from "@/lib/plaid-server";
 
 // Cloud copy of the Financial Center. The browser keeps a local copy too and
@@ -59,6 +60,7 @@ export async function GET(req: Request) {
       const saved = await writeDoc(KEY, doc?.rev ?? 0, merged);
       if (saved.ok) doc = { rev: saved.rev, data: merged };
     }
+    if (doc?.data) console.log(`money accounts: ${accountDiag(doc.data)}`);
     return packed({ configured: true, rev: doc?.rev ?? 0, data: doc?.data ?? null });
   } catch (e) {
     return failed(e);
