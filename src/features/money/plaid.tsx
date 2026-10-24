@@ -6,6 +6,7 @@ import { useDefaultScope, ScopeBadge, SCOPES } from "./scope";
 import type { Scope, BankLink, MoneyData } from "./types";
 import { Card, Empty, buttonClass, ghostButtonClass } from "./ui";
 import { HISTORY_DONE, saveBriefing } from "./briefing";
+import { setMode } from "./intel-shared";
 
 /*
  * Connect banks and cards through Plaid. Plaid Link (Plaid's own sign-in
@@ -99,6 +100,25 @@ async function openLink(linkToken: string) {
     });
     handler.open();
   });
+}
+
+/**
+ * Connects a bank straight from anywhere in Money (no trip to Accounts): opens
+ * Plaid, saves the connection for `scope`, then brings its history in. Bank
+ * accounts already here with the same last 4 digits are taken over, so their
+ * history and company stay as they are.
+ */
+export async function connectBank(scope: Scope): Promise<string> {
+  const { linkToken } = await api<{ linkToken: string }>("link-token", {});
+  const publicToken = await openLink(linkToken);
+  if (!publicToken) return "";
+  const id = newId();
+  const { itemId, link } = await api<{ itemId: string; link: string }>("exchange", { publicToken, id, scope });
+  const bank: BankLink = { id, itemId, institution: "", link, cursor: "", scope, connectedAt: new Date().toISOString() };
+  setMoneyData((d) => ({ ...d, bankLinks: [...d.bankLinks, bank] }));
+  setMode("real");
+  await firstSync(bank, () => {});
+  return id;
 }
 
 /* ---------------- Syncing ---------------- */
@@ -310,6 +330,10 @@ export function useAutoSync(data: MoneyData | null) {
         if (needsYou(l)) return false;
         // A failed bank is retried once each time the page opens, not in a loop.
         if (l.error) return !tried.current.has(l.id);
+        // A connection whose account is also kept as a leftover copy is synced once per visit, which merges the two.
+        const mine = d.accounts.filter((a) => a.plaid?.linkId === l.id && a.last4);
+        const twin = d.accounts.some((x) => (!x.plaid || !d.bankLinks.some((k) => k.id === x.plaid!.linkId)) && mine.some((a) => a.last4 === x.last4 && (a.scope ?? "personal") === (x.scope ?? "personal")));
+        if (twin && !tried.current.has(l.id)) return true;
         // A connected account with no balance from the bank yet is refreshed once per visit.
         if (!tried.current.has(l.id) && d.accounts.some((a) => a.plaid?.linkId === l.id && !a.bankBalance)) return true;
         return age(l) > (l.historyStatus === HISTORY_DONE ? STALE_MS : RETRY_MS);

@@ -25,7 +25,8 @@ export type BalanceState =
   | "bank" // the bank's balance from the last sync
   | "bank-old" // the bank's balance, but the last sync is over a day old (still shown and counted)
   | "waiting" // connected, but the bank hasn't sent a balance yet
-  | "unlinked"; // not connected to a bank (typed in or filled from statements)
+  | "lost" // has bank transactions, but its bank connection is gone, so no live balance
+  | "unlinked"; // never connected to a bank (typed in or filled from statements)
 
 export type AccountLine = {
   name: string;
@@ -36,6 +37,7 @@ export type AccountLine = {
   asOf: string | null; // when the bank gave this balance
   lastSync: string | null; // last successful sync of its bank connection
   twin?: string; // the same account number is connected under another entity
+  lastBankTxn?: string; // date of its latest bank transaction, when the connection is gone
 };
 
 export type EntityBalance = {
@@ -64,7 +66,9 @@ export function balances(d: MoneyData, now = Date.now()): EntityBalance[] {
     const bb = a.bankBalance;
     const lastSync = link?.lastSync ?? null;
     const has = !!bb && (bb.current !== null || bb.available !== null);
-    const state: BalanceState = !link ? (has ? "bank-old" : "unlinked") : !has ? "waiting" : now - new Date(bb!.asOf).getTime() > FRESH_HOURS * 3600_000 ? "bank-old" : "bank";
+    const bankDates = !link ? d.transactions.filter((t) => t.accountId === a.id && t.plaidId).map((t) => t.date) : [];
+    const lastBankTxn = bankDates.length ? bankDates.sort().at(-1) : undefined;
+    const state: BalanceState = !link ? (has ? "bank-old" : lastBankTxn ? "lost" : "unlinked") : !has ? "waiting" : now - new Date(bb!.asOf).getTime() > FRESH_HOURS * 3600_000 ? "bank-old" : "bank";
     const twin = !link
       ? d.accounts.find((x) => x.id !== a.id && x.last4 && x.last4 === a.last4 && isDebt(x) === isDebt(a) && x.plaid && links.has(x.plaid.linkId))
       : undefined;
@@ -78,6 +82,7 @@ export function balances(d: MoneyData, now = Date.now()): EntityBalance[] {
       asOf: has ? bb!.asOf : null,
       lastSync,
       twin: twin ? entityLabel(entityOf(twin)) : undefined,
+      lastBankTxn,
     };
   };
   const r2 = (n: number) => Math.round(n * 100) / 100;

@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { applyScan, detectRecurring, SCAN_RULES } from "./bill-intel";
-import { money, today } from "./calc";
+import { addDays, money, today } from "./calc";
 import { ago } from "./intel-shared";
 import { CONFIDENCE_LABEL, ENTITIES, balances, type AccountLine, cadenceWord, entityLabel, total, transactionRows, upcoming, type Confidence, type EntityBalance, type TxnRow, type UpcomingLine } from "./outlook";
-import { syncAll, useSyncActivity } from "./plaid";
+import { connectBank, syncAll, useSyncActivity } from "./plaid";
 import { freshness } from "./briefing";
 import { newId, setMoneyData } from "./store";
 import type { MoneyData } from "./types";
@@ -129,7 +129,6 @@ export function Overview({ data, onSettings }: { data: MoneyData; onSettings: ()
             query={query}
             hasBankTxns={hasBankTxns}
             linked={data.bankLinks.length > 0}
-            onSettings={onSettings}
           />
         ))}
       </div>
@@ -143,7 +142,9 @@ function AccountRow({ a, card, onConnect }: { a: AccountLine; card?: boolean; on
   const why =
     a.state === "waiting"
       ? `Waiting for the bank's balance${a.lastSync ? ` · last sync ${ago(a.lastSync)}` : ""} · refreshing`
-      : a.state === "unlinked"
+      : a.state === "lost"
+        ? `Bank connection missing · bank history through ${a.lastBankTxn ? dayLabel(a.lastBankTxn) : "earlier"} · no live balance`
+        : a.state === "unlinked"
         ? a.twin
           ? `Not connected here; the same account number is connected under ${a.twin}`
           : "Not connected to a bank"
@@ -159,9 +160,9 @@ function AccountRow({ a, card, onConnect }: { a: AccountLine; card?: boolean; on
         </span>
         <span className="flex shrink-0 flex-col items-end tabular-nums">
           {a.amount === null ? (
-            a.state === "unlinked" ? (
+            a.state === "unlinked" || a.state === "lost" ? (
               <button className="underline hover:text-zinc-900 dark:hover:text-zinc-100" onClick={onConnect}>
-                Connect
+                {a.state === "lost" ? "Reconnect" : "Connect"}
               </button>
             ) : (
               <span>—</span>
@@ -184,9 +185,7 @@ function EntityPanel({
   query,
   hasBankTxns,
   linked,
-  onSettings,
 }: {
-  onSettings: () => void;
   b: EntityBalance;
   lines: UpcomingLine[];
   txns: TxnRow[];
@@ -198,6 +197,25 @@ function EntityPanel({
   const [open, setOpen] = useState<string | null>(null);
   const due7 = total(lines, undefined, 7);
   const due30 = total(lines, undefined, 30);
+  const in7 = lines.some((l) => l.date <= addDays(today(), 6));
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState("");
+  // Bank history, but no live connection feeding any of this company's accounts.
+  const all = [...b.accounts, ...b.cards];
+  const missing = all.filter((a) => a.state === "lost" || a.state === "unlinked");
+  const needsConnection = b.counted === 0 && missing.length > 0;
+  const lost = all.some((a) => a.state === "lost");
+  async function reconnect() {
+    setConnectError("");
+    setConnecting(true);
+    try {
+      await connectBank(b.entity);
+    } catch (e) {
+      setConnectError((e as Error).message);
+    } finally {
+      setConnecting(false);
+    }
+  }
   return (
     <section className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-surface dark:border-zinc-800" data-testid={`panel-${b.entity}`} aria-label={entityLabel(b.entity)}>
       {/* Balance */}
@@ -207,21 +225,33 @@ function EntityPanel({
         <p className="text-xs text-zinc-500" data-testid={`bal-note-${b.entity}`}>
           {b.counted
             ? `Cash available${b.asOf ? ` · bank balance ${ago(b.asOf)}` : ""}${b.stale ? ` · ${b.stale} account${b.stale === 1 ? "" : "s"} without a balance` : ""}`
-            : b.accounts.length
-              ? "No bank balance yet"
-              : "No checking or savings account"}
+            : needsConnection
+              ? lost
+                ? `${entityLabel(b.entity)} has bank history, but no live bank connection, so there is no current balance.`
+                : `${entityLabel(b.entity)}'s accounts aren't connected to a bank, so there is no current balance.`
+              : b.accounts.length
+                ? "Waiting for the bank's balance"
+                : "No checking or savings account"}
         </p>
+        {needsConnection && (
+          <div className="mt-2 flex flex-col gap-1" data-testid={`reconnect-${b.entity}`}>
+            <button className="self-start rounded-full bg-brand px-4 py-1.5 text-sm font-medium text-on-brand disabled:opacity-60" onClick={() => void reconnect()} disabled={connecting}>
+              {connecting ? "Connecting…" : `${lost ? "Reconnect" : "Connect"} ${entityLabel(b.entity)}'s bank`}
+            </button>
+            {connectError && <p className="text-xs text-rose-600 dark:text-rose-400">{connectError}</p>}
+          </div>
+        )}
         {b.accounts.length > 0 && (
           <ul className="mt-2 flex flex-col gap-1 text-xs text-zinc-500" data-testid={`accts-${b.entity}`}>
             {b.accounts.map((a, i) => (
-              <AccountRow key={i} a={a} onConnect={onSettings} />
+              <AccountRow key={i} a={a} onConnect={() => void reconnect()} />
             ))}
           </ul>
         )}
         {b.cards.length > 0 && (
           <ul className="mt-2 flex flex-col gap-1 border-t border-dashed border-zinc-200 pt-2 text-xs text-zinc-500 dark:border-zinc-800" data-testid={`cards-${b.entity}`}>
             {b.cards.map((c, i) => (
-              <AccountRow key={i} a={c} card onConnect={onSettings} />
+              <AccountRow key={i} a={c} card onConnect={() => void reconnect()} />
             ))}
             {b.cards.length > 1 && (
               <li className="flex justify-between gap-2 font-medium">
@@ -234,15 +264,15 @@ function EntityPanel({
         <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-zinc-100 pt-3 text-xs dark:border-zinc-800">
           <div>
             <dt className="text-zinc-500">Due 7 days</dt>
-            <dd className="font-medium tabular-nums">{money(due7)}</dd>
+            <dd className="font-medium tabular-nums">{in7 ? money(due7) : <span className="font-normal text-zinc-500">None found</span>}</dd>
           </div>
           <div>
             <dt className="text-zinc-500">Due 30 days</dt>
-            <dd className="font-medium tabular-nums">{money(due30)}</dd>
+            <dd className="font-medium tabular-nums">{lines.length ? money(due30) : <span className="font-normal text-zinc-500">None found</span>}</dd>
           </div>
           <div>
             <dt className="text-zinc-500">After bills</dt>
-            <dd className={`font-medium tabular-nums ${b.counted && b.available - due30 < 0 ? "text-rose-600 dark:text-rose-400" : ""}`}>{b.counted ? money(b.available - due30) : "—"}</dd>
+            <dd className={`font-medium tabular-nums ${b.counted && b.available - due30 < 0 ? "text-rose-600 dark:text-rose-400" : ""}`}>{b.counted ? money(b.available - due30) : <span className="font-normal text-zinc-500">Needs a live balance</span>}</dd>
           </div>
         </dl>
       </div>

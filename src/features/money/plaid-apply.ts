@@ -141,7 +141,11 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
       plaidId: pt.id,
     });
   }
-  const transactions = [...existing.filter((t) => !claimed.has(t.id)), ...incoming];
+  let transactions = [...existing.filter((t) => !claimed.has(t.id)), ...incoming];
+  let merged: MoneyData = { ...d, accounts, transactions };
+  merged = mergeTwins(merged, link);
+  transactions = merged.transactions;
+  accounts.splice(0, accounts.length, ...merged.accounts);
 
   // Set each account's starting balance so its balance matches the bank's.
   const balanced = accounts.map((a): Account => {
@@ -154,7 +158,7 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
   });
 
   return {
-    ...d,
+    ...merged,
     accounts: balanced,
     transactions,
     bankLinks: d.bankLinks.map((l) =>
@@ -173,3 +177,45 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
   };
 }
 
+
+/**
+ * The same bank account kept twice: once fed by this connection and once left
+ * over from an earlier connection or from statements, in the same company. Its
+ * history moves onto the connected one (exact repeats dropped), anything that
+ * pointed at the leftover now points at the connected one, and the leftover goes.
+ */
+export function mergeTwins(d: MoneyData, link: BankLink): MoneyData {
+  const live = new Set(d.bankLinks.map((l) => l.id));
+  const debt = (a: Account) => a.type === "credit" || a.type === "loan";
+  const into = new Map<string, string>(); // leftover account id -> connected account id
+  for (const y of d.accounts) {
+    if (y.plaid?.linkId !== link.id || !y.last4) continue;
+    for (const x of d.accounts) {
+      if (x.id === y.id || into.has(x.id) || x.last4 !== y.last4 || debt(x) !== debt(y) || (x.scope ?? "personal") !== (y.scope ?? "personal")) continue;
+      if (x.plaid && live.has(x.plaid.linkId)) continue; // fed by another live connection
+      into.set(x.id, y.id);
+    }
+  }
+  if (!into.size) return d;
+  const seen = new Set(d.transactions.filter((t) => !into.has(t.accountId)).map((t) => `${t.accountId}|${t.date}|${t.amount}|${t.kind}|${t.description}`));
+  const transactions: Transaction[] = [];
+  for (const t of d.transactions) {
+    const to = into.get(t.accountId);
+    if (!to) {
+      transactions.push(t);
+      continue;
+    }
+    const key = `${to}|${t.date}|${t.amount}|${t.kind}|${t.description}`;
+    if (seen.has(key)) continue; // already on the connected account
+    seen.add(key);
+    transactions.push({ ...t, accountId: to });
+  }
+  const re = (id: string | undefined) => (id && into.get(id)) || id;
+  return {
+    ...d,
+    accounts: d.accounts.filter((a) => !into.has(a.id)),
+    transactions,
+    bills: d.bills.map((b) => (into.has(b.accountId) ? { ...b, accountId: into.get(b.accountId)! } : b)),
+    recurring: d.recurring.map((f) => (f.accountIds.some((id) => into.has(id)) ? { ...f, accountIds: [...new Set(f.accountIds.map((id) => re(id)!))], occurrences: f.occurrences.map((o) => (into.has(o.accountId) ? { ...o, accountId: into.get(o.accountId)! } : o)) } : f)),
+  };
+}
