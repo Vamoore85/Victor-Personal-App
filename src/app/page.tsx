@@ -8,10 +8,10 @@ export default function Home() {
     <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-16">
       <header className="mb-10 flex items-center gap-5">
         <Image
-          src="/maverick-logo.png"
-          alt="Maverick logo"
+          src="/maverick-black-beauty.webp"
+          alt="Maverick, a black horse at sunset"
           width={88}
-          height={88}
+          height={106}
           priority
           className="rounded-2xl"
         />
