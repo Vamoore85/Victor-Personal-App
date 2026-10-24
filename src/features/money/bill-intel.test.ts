@@ -101,3 +101,8 @@ test("the big monthly check from the personal account is rent, the smaller ones 
   assert.ok(cs);
   assert.equal(cs.typical, 350);
 });
+
+test("a check with CHK in the middle of the bank's wording still counts", () => {
+  const d = data(months(1, 8, 4).map((day, i) => t("2222", day, 640, `PAID CHK ${500 + i}`, "Owner draw")));
+  assert.ok(find(d, /^Check 640$/));
+});

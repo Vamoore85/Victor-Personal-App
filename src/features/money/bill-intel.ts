@@ -96,7 +96,7 @@ const MOVEMENT = /\b(XFER|TRANSFER|ZELLE|VENMO|CASH ?APP|ATM|CASH WITHDRAWAL|WIT
  * kinds of spending that only make sense added up per month. Each gets one
  * name so its payments are looked at together.
  */
-const CHECK = /^CHECK\b|\bCHECK ?#|\bCHECK NUMBER\b|^CHK\b/i;
+const CHECK = /^CHECK\b|\bCHECK ?#|\bCHECK NUMBER\b|\bCHECK \d|\bCHK\b/i;
 const CHILD_SUPPORT = /CHILD ?SUPPORT|\bCSEA\b|\bCSES\b|\bSDU\b|FAMILY SUPPORT|SUPPORT ENFORCEMENT/i;
 const PERSON_PAYMENT = /\b(ZELLE|VENMO|CASH ?APP)\b.*\b(TO|SENT|PAYMENT)\b|\b(TO|SENT|PAYMENT)\b.*\b(ZELLE|VENMO|CASH ?APP)\b/i;
 const NOT_OUTGOING = /\b(DEPOSIT(ED)?|REFUND|REVERSAL|RETURN(ED)?|FROM)\b|^RETURN-/i;
@@ -124,7 +124,7 @@ const CARD_PAYMENT = /\b(CRD PMT|CARD ?PAYMENT|CREDIT CARD|CC PMT|EPAYMENT|E-PAY
 export const isCardPayment = (t: Transaction) => t.category === "Debt payments" || CARD_PAYMENT.test(t.description);
 
 /** Bump when the rules below change, so saved scans are redone. */
-export const SCAN_RULES = 7;
+export const SCAN_RULES = 8;
 
 export function isCandidate(t: Transaction, direction: "out" | "in") {
   if (direction === "out" && t.kind === "expense" && t.amount > 0 && t.transferId !== "imported" && isCardPayment(t) && !/\b(REFUND|REVERSAL|RETURN)\b/i.test(t.description)) return true;
