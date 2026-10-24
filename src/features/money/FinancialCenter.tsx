@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ScopeContext, filterByScope, type ScopeView } from "./scope";
 import { cloudErrorMessage, importMoneyData, retryCloud, useCloudState, useMoneyData } from "./store";
@@ -209,6 +210,9 @@ export function FinancialCenter() {
       {tab === "accounts" && (
         <>
           <AssignAccounts data={data} />
+          <Link href="/integrations" className="self-start text-sm text-zinc-500 underline hover:text-brand">
+            All connections (banks, QuickBooks, Outlook, home apps) are on the Integrations page
+          </Link>
           <BankLinks
             data={data}
             onBriefing={() => {

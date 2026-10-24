@@ -22,6 +22,7 @@ export const AREA_GROUPS: readonly { id: AreaGroup; label: string }[] = [
 export const LIFE_AREAS: readonly LifeArea[] = [
   { slug: "money", short: "Money", group: "work", label: "Financial Center", blurb: "Accounts, bills, cards, budgets and Maverick Vault", href: "/money" },
   { slug: "invest", short: "Invest", group: "work", label: "Invest", blurb: "Goals, plus the books and video clips that get you there", href: "/invest" },
+  { slug: "projects", short: "Projects", group: "work", label: "Projects", blurb: "Brain Dump inbox, projects, tasks and someday", href: "/projects" },
   { slug: "ideas", short: "Ideas", group: "work", label: "Ideas", blurb: "A free-form place to dump ideas", href: "/ideas" },
   { slug: "research", short: "Research", group: "work", label: "Research Center", blurb: "Questions, notes and sources", href: "/research" },
   { slug: "events", short: "Events", group: "work", label: "Events & Speakers", blurb: "Special events and speakers worth following", href: "/events" },
@@ -29,7 +30,7 @@ export const LIFE_AREAS: readonly LifeArea[] = [
   { slug: "health", short: "Health", group: "life", label: "Health & Fitness", blurb: "Workouts, weight, sleep, and habits", href: "/health" },
   { slug: "style", short: "Style", group: "life", label: "Fashion & Clothes", blurb: "Wardrobe, outfits, and wish list", href: "/style" },
   { slug: "travel", short: "Travel", group: "life", label: "Travel & Vacation", blurb: "Trips, vacations, and places to go", href: "/travel" },
-  { slug: "tasks", short: "Tasks", group: "work", label: "Tasks", blurb: "To-dos, projects, and priorities" },
+
   { slug: "calendar", short: "Calendar", group: "life", label: "Calendar", blurb: "Schedule, events, and reminders" },
   { slug: "people", short: "People", group: "life", label: "People", blurb: "Family, friends, and contacts" },
 ];

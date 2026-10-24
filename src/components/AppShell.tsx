@@ -93,6 +93,9 @@ function AccountLinks({ onNavigate }: { onNavigate?: () => void }) {
   const row = "flex h-9 items-center gap-3 rounded-lg px-2.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800/70";
   return (
     <div className="flex flex-col gap-0.5 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+      <Link href="/integrations" onClick={onNavigate} className={row}>
+        <Icon name="plug" /> Integrations
+      </Link>
       <Link href="/security" onClick={onNavigate} className={row}>
         <Icon name="key" /> 2-step sign-in
       </Link>
