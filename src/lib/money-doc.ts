@@ -55,6 +55,8 @@ const LOOK_FOR: [string, RegExp][] = [
   ["card-payment", /CRD PMT|CARD ?PAYMENT|CREDIT CARD|CC PMT|E-?PAYMENT|AUTOPAY|AUTO PAY|CAPITAL ONE|DISCOVER|AMEX|AMERICAN EXPRESS|CHASE|CITI|SYNCHRONY|BARCLAY/i],
   ["checks", /^CHECK|CHECK ?#|CHECK NUMBER|\bCHK\b/i],
   ["apple", /APPLE|ITUNES/i],
+  ["rent", /\bRENT\b|LEASE|APARTMENT|APTS?\b|PROPERTY|PROPERTIES|MANAGEMENT|MGMT|REALTY|HOUSING|LANDLORD|MORTGAGE|HOME LOAN|RENTCAFE|APPFOLIO|BILT|ZILLOW|YARDI|BUILDIUM|COZY|AVAIL|PAYLEASE|ZEGO/i],
+  ["personal-checks", /^CHECK|CHECK ?#|CHECK NUMBER|\bCHK\b/i],
   ["subscriptions", /NETFLIX|SPOTIFY|HULU|DISNEY|YOUTUBE|AMAZON PRIME|PRIME VIDEO|PARAMOUNT|PEACOCK|MAX\b|HBO|ADOBE|MICROSOFT|GOOGLE|DROPBOX|OPENAI|CHATGPT|ANTHROPIC|CLAUDE|PATREON|AUDIBLE|SIRIUS/i],
 ];
 export function billDiag(data: unknown) {
@@ -84,5 +86,19 @@ export function billDiag(data: unknown) {
       .join(",");
     out.push(`${name}: n=${ts.length} candidates=${cand} accts=${[...byAcct].map(([k, v]) => `${k}:${v}`).join(",")} last=${last} cats=${cats} keys=${shownKeys} findings=${finds || "none"}`);
   }
+  // Big monthly-sized payments out of Personal accounts, by payee and size band (no exact amounts).
+  const personal = new Set(d.accounts.filter((a) => (a.scope ?? "personal") === "personal").map((a) => a.id));
+  const big = new Map<string, { n: number; months: Set<string>; days: Set<number> }>();
+  for (const t of d.transactions) {
+    if (t.kind !== "expense" || !personal.has(t.accountId) || t.amount < 1000) continue;
+    const band = t.amount < 1500 ? "1-1.5k" : t.amount < 2500 ? "1.5-2.5k" : "2.5k+";
+    const k = `${groupKey(t).replace(/^CHECK .*/, "CHECK")}/${t.category}/${band}/${acct.get(t.accountId)?.last4}`;
+    const g = big.get(k) ?? { n: 0, months: new Set(), days: new Set() };
+    g.n++;
+    g.months.add(t.date.slice(0, 7));
+    g.days.add(+t.date.slice(8, 10));
+    big.set(k, g);
+  }
+  out.push(`personal-big: ${[...big].sort((a, b) => b[1].n - a[1].n).slice(0, 12).map(([k, g]) => `${k}:n${g.n}/m${g.months.size}/days${[...g.days].sort((x, y) => x - y).join(".")}`).join(", ") || "none"}`);
   return out.join(" || ") + ` | scan=${d.billScan ? `${d.billScan.found}@${d.billScan.windowEnd}/rules${d.billScan.rules}` : "none"} recurring=${d.recurring.length}`;
 }
