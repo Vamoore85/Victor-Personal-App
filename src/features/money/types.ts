@@ -72,6 +72,7 @@ export type Account = {
   // you assign it under Accounts. A bank never decides this on its own.
   needsEntity?: boolean;
   entitySetAt?: string; // when you (or a stated correction) assigned it
+  nickname?: string; // your name for it, e.g. "Gladiator Payroll"; the bank's name stays in `name`
   // The same bank account reached through another connection to the same
   // bank. Its feed is folded into this account, never kept as a second copy.
   plaidAliases?: { linkId: string; accountId: string }[];

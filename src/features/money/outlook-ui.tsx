@@ -166,9 +166,12 @@ function AccountRow({ a, card, onConnect }: { a: AccountLine; card?: boolean; on
   return (
     <li className="flex flex-col">
       <span className="flex justify-between gap-2">
-        <span className="truncate">
-          {a.name}
-          {a.last4 && ` ··${a.last4}`}
+        <span className="min-w-0">
+          <span className="block truncate">
+            {a.name}
+            {a.last4 && ` ··${a.last4}`}
+          </span>
+          {a.bankName && <span className="block truncate text-[11px] text-zinc-400">{a.bankName}</span>}
         </span>
         <span className="flex shrink-0 flex-col items-end tabular-nums">
           {a.amount === null ? (

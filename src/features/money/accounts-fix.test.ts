@@ -140,3 +140,52 @@ test("a sync through a duplicate connection doesn't recreate copies", () => {
   assert.equal(clean.accounts.length, 6);
   assert.equal(clean.transactions.filter((t) => t.accountId === "g5105").length, 3);
 });
+
+test("··5105 is Gladiator Payroll and ··5815 is Gladiator Bills, kept apart, and both survive a sync", () => {
+  const { data } = cleanAccounts(production());
+  const pay = data.accounts.find((a) => a.id === "g5105")!;
+  const bills = data.accounts.find((a) => a.id === "g5815")!;
+  assert.equal(pay.scope, "gladiator");
+  assert.equal(pay.nickname, "Gladiator Payroll");
+  assert.equal(pay.name, "Account 5105"); // the bank's name stays as the secondary label
+  assert.equal(bills.scope, "gladiator");
+  assert.equal(bills.nickname, "Gladiator Bills");
+  assert.notEqual(pay.id, bills.id);
+  const gl = balances(data).find((b) => b.entity === "gladiator")!;
+  assert.deepEqual(gl.accounts.map((a) => a.name).sort(), ["Account 5443", "Gladiator Bills", "Gladiator Payroll"]);
+  assert.equal(gl.accounts.find((a) => a.name === "Gladiator Payroll")!.bankName, "Account 5105");
+  // A sync from their own connection keeps the company and the name.
+  const l0 = data.bankLinks.find((l) => l.id === "L0")!;
+  const synced = cleanAccounts(
+    applySync(data, l0, {
+      cursor: "c3",
+      hasMore: false,
+      updateStatus: "HISTORICAL_UPDATE_COMPLETE",
+      institution: "M&T Bank",
+      accounts: ["5105", "5815", "5249"].map((m) => ({ id: `L0-${m}`, name: `Bank name ${m}`, mask: m, type: "depository", subtype: "checking", current: 5, available: 5 })),
+      added: [{ id: "y1", accountId: "L0-5105", amount: 12, date: "2026-10-22", name: "Payee 12", pending: false, category: "" }],
+      modified: [],
+      removed: [],
+    }),
+  ).data;
+  const after = synced.accounts.find((a) => a.id === "g5105")!;
+  assert.equal(after.scope, "gladiator");
+  assert.equal(after.nickname, "Gladiator Payroll");
+  assert.equal(synced.accounts.find((a) => a.id === "g5815")!.nickname, "Gladiator Bills");
+  assert.equal(synced.transactions.filter((t) => t.accountId === "g5105").length, 4);
+  // Not in Maverick's or Personal's figures.
+  for (const e of ["business", "personal"] as const) {
+    const b = balances(synced).find((x) => x.entity === e)!;
+    assert.ok(!b.accounts.some((a) => a.last4 === "5105" || a.last4 === "5815"));
+  }
+});
+
+test("a database already on rules version 1 gets the version 2 names without redoing version 1", () => {
+  const v1 = { ...cleanAccounts(production()).data, accountRules: 1 };
+  const p = v1.accounts.find((a) => a.id === "g5105")!;
+  delete p.nickname;
+  const { data } = cleanAccounts(v1);
+  assert.equal(data.accounts.find((a) => a.id === "g5105")!.nickname, "Gladiator Payroll");
+  assert.equal(data.accounts.find((a) => a.id === "p5249")!.needsEntity, true);
+  assert.equal(data.accountRules, 2);
+});

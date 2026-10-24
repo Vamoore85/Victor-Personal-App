@@ -14,7 +14,10 @@ import type { Account, BankLink, MoneyData, Scope, Transaction } from "./types";
  * account name: an account is either assigned (by you) or "needs assignment".
  */
 
-export const ACCOUNT_RULES = 1;
+export const ACCOUNT_RULES = 2;
+
+/** Your name for an account if you gave one, else the bank's. */
+export const accountLabel = (a: { name: string; nickname?: string }) => a.nickname || a.name;
 
 const debt = (a: Account) => a.type === "credit" || a.type === "loan";
 const txnKey = (t: Transaction) => `${t.date}|${t.amount}|${t.kind}|${t.description}`;
@@ -105,16 +108,18 @@ export function dedupeAccounts(d: MoneyData): { data: MoneyData; merged: number 
 }
 
 /**
- * Owner's stated corrections, applied once. Each must match exactly one record
- * on several facts (not the last 4 alone); after that the account's own id
- * carries the assignment. Victor, 2026-10-24: the checking account ending 5443
- * (no live connection, filled from statements) is Gladiator's, not Maverick's.
+ * Owner's stated corrections, each applied once (by rules version). Each must
+ * match exactly one record on several facts, not the last 4 alone; after that
+ * the account's own record (which carries its Plaid account id) holds the
+ * assignment, and syncs and the clean-up keep it.
  */
-const CORRECTIONS: { match: (a: Account, d: MoneyData) => boolean; entity: Scope }[] = [
-  {
-    match: (a, d) => a.last4 === "5443" && a.type === "checking" && (!a.plaid || !d.bankLinks.some((l) => l.id === a.plaid!.linkId)),
-    entity: "gladiator",
-  },
+const liveFeed = (a: Account, d: MoneyData) => !!a.plaid && d.bankLinks.some((l) => l.id === a.plaid!.linkId && !l.duplicateOf);
+const CORRECTIONS: { version: number; match: (a: Account, d: MoneyData) => boolean; entity: Scope; nickname?: string }[] = [
+  // Victor, 2026-10-24: the checking account ending 5443 (no live connection, filled from statements) is Gladiator's, not Maverick's.
+  { version: 1, match: (a, d) => a.last4 === "5443" && a.type === "checking" && !liveFeed(a, d), entity: "gladiator" },
+  // Victor, 2026-10-24: the connected M&T checking ending 5105 is Gladiator Payroll, and the one ending 5815 is Gladiator Bills (two accounts, never merged).
+  { version: 2, match: (a, d) => a.last4 === "5105" && a.type === "checking" && liveFeed(a, d), entity: "gladiator", nickname: "Gladiator Payroll" },
+  { version: 2, match: (a, d) => a.last4 === "5815" && a.type === "checking" && liveFeed(a, d), entity: "gladiator", nickname: "Gladiator Bills" },
 ];
 
 /**
@@ -123,10 +128,12 @@ const CORRECTIONS: { match: (a: Account, d: MoneyData) => boolean; entity: Scope
  * everything else becomes "needs assignment". Then the stated corrections.
  */
 export function migrateEntities(d: MoneyData, now = new Date().toISOString()): { data: MoneyData; unassigned: number; corrected: string[] } {
-  if ((d.accountRules ?? 0) >= ACCOUNT_RULES) return { data: d, unassigned: 0, corrected: [] };
+  const from = d.accountRules ?? 0;
+  if (from >= ACCOUNT_RULES) return { data: d, unassigned: 0, corrected: [] };
   const links = new Map(d.bankLinks.map((l) => [l.id, l]));
   let unassigned = 0;
   let accounts = d.accounts.map((a): Account => {
+    if (from >= 1) return a; // version 1 (unassign implicit companies) already ran
     if (a.entitySetAt || a.needsEntity) return a;
     const link = a.plaid ? links.get(a.plaid.linkId) : undefined;
     const chosen = !!link && !!a.scope && a.scope !== (link.scope ?? "personal");
@@ -137,11 +144,12 @@ export function migrateEntities(d: MoneyData, now = new Date().toISOString()): {
   const corrected: string[] = [];
   const moved = new Map<string, Scope>();
   for (const c of CORRECTIONS) {
+    if (c.version <= from) continue;
     const hits = accounts.filter((a) => c.match(a, d));
     if (hits.length !== 1) continue; // ambiguous or gone: leave it for you to assign
     const id = hits[0].id;
     if (hits[0].needsEntity) unassigned--;
-    accounts = accounts.map((a) => (a.id === id ? { ...a, scope: c.entity, needsEntity: undefined, entitySetAt: now } : a));
+    accounts = accounts.map((a) => (a.id === id ? { ...a, scope: c.entity, needsEntity: undefined, entitySetAt: now, ...(c.nickname ? { nickname: c.nickname } : {}) } : a));
     moved.set(id, c.entity);
     corrected.push(id);
   }

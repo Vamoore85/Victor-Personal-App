@@ -1,6 +1,6 @@
 "use client";
 
-import { assignEntity } from "./accounts-fix";
+import { accountLabel, assignEntity } from "./accounts-fix";
 import { ENTITIES, entityLabel } from "./outlook";
 import { setMoneyData } from "./store";
 import type { MoneyData, Scope } from "./types";
@@ -18,7 +18,7 @@ export function AssignAccounts({ data }: { data: MoneyData }) {
       const link = a.plaid ? links.get(a.plaid.linkId) : undefined;
       return { a, bank: link?.institution || "", live: !!link };
     })
-    .sort((x, y) => Number(!!y.a.needsEntity) - Number(!!x.a.needsEntity) || x.a.name.localeCompare(y.a.name));
+    .sort((x, y) => Number(!!y.a.needsEntity) - Number(!!x.a.needsEntity) || accountLabel(x.a).localeCompare(accountLabel(y.a)));
   const open = rows.filter((r) => r.a.needsEntity).length;
 
   function pick(id: string, to: Scope, from: Scope | null) {
@@ -41,11 +41,11 @@ export function AssignAccounts({ data }: { data: MoneyData }) {
             <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 py-3" data-testid={`assign-${a.id}`}>
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">
-                  {a.name}
+                  {accountLabel(a)}
                   {a.last4 && <span className="text-zinc-500"> ··{a.last4}</span>}
                 </p>
                 <p className="text-xs text-zinc-500">
-                  {[bank, a.type === "credit" ? "Card" : a.type === "loan" ? "Loan" : a.type === "savings" ? "Savings" : a.type === "checking" ? "Checking" : a.type, live ? "connected" : "no live connection"].filter(Boolean).join(" · ")}
+                  {[a.nickname ? a.name : "", bank, a.type === "credit" ? "Card" : a.type === "loan" ? "Loan" : a.type === "savings" ? "Savings" : a.type === "checking" ? "Checking" : a.type, live ? "connected" : "no live connection"].filter(Boolean).join(" · ")}
                   {a.needsEntity && <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-300">Needs assignment</span>}
                 </p>
               </div>

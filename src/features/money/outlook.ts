@@ -1,3 +1,4 @@
+import { accountLabel } from "./accounts-fix";
 import { accountBalance, addDays, billDatesBetween, today as todayYmd } from "./calc";
 import { effective, FRESH_HOURS, stepCadence } from "./bill-intel";
 import type { Account, MoneyData, RecurringCadence, RecurringFinding, Scope, Transaction } from "./types";
@@ -31,7 +32,8 @@ export type BalanceState =
   | "unlinked"; // never connected to a bank (typed in or filled from statements)
 
 export type AccountLine = {
-  name: string;
+  name: string; // your name for it, else the bank's
+  bankName?: string; // the bank's name, when you've named it yourself
   last4?: string;
   amount: number | null; // cash: available (else current); cards: owed
   credit?: number | null; // cards: credit left
@@ -76,7 +78,8 @@ export function balances(d: MoneyData, now = Date.now()): EntityBalance[] {
       : undefined;
     const amount = !has ? null : isDebt(a) ? (bb!.current ?? 0) : (bb!.available ?? bb!.current ?? 0);
     return {
-      name: a.name,
+      name: accountLabel(a),
+      bankName: a.nickname ? a.name : undefined,
       last4: a.last4,
       amount,
       credit: isDebt(a) && has ? (bb!.available ?? null) : undefined,
@@ -158,7 +161,7 @@ export function upcoming(d: MoneyData, days = 30, t = todayYmd()): UpcomingLine[
         confidence: "confirmed",
         predicted: false,
         entity: b.scope ?? entityOf(a),
-        account: a?.name ?? "",
+        account: a ? accountLabel(a) : "",
         billId: b.id,
       });
     }
@@ -181,7 +184,7 @@ export function upcoming(d: MoneyData, days = 30, t = todayYmd()): UpcomingLine[
           confidence: f.status === "confirmed" ? "confirmed" : f.confidence,
           predicted: f.status !== "confirmed",
           entity: e.scope,
-          account: a?.name ?? "",
+          account: a ? accountLabel(a) : "",
           findingId: f.id,
         });
       date = stepCadence(e.cadence, f.usualDay, date);
@@ -222,7 +225,7 @@ export type RecurringRow = {
  * uncertain is "Needs review". Nothing is listed without real transactions behind it.
  */
 export function recurringRows(d: MoneyData): RecurringRow[] {
-  const acct = new Map(d.accounts.map((a) => [a.id, a.name]));
+  const acct = new Map(d.accounts.map((a) => [a.id, accountLabel(a)]));
   const assigned = new Set(d.accounts.filter(counts).map((a) => a.id));
   return d.recurring
     .filter((f) => f.direction === "out" && f.status !== "dismissed" && f.occurrences.length > 0 && (!f.accountIds.length || f.accountIds.some((id) => assigned.has(id))))
@@ -294,7 +297,7 @@ export function transactionRows(d: MoneyData, query = ""): TxnRow[] {
     .filter((t) => counts(acct.get(t.accountId)))
     .map((t) => {
       const a = acct.get(t.accountId);
-      return { t, entity: entityOf(a), account: a?.name ?? "Removed account", signed: t.kind === "income" ? t.amount : -t.amount };
+      return { t, entity: entityOf(a), account: a ? accountLabel(a) : "Removed account", signed: t.kind === "income" ? t.amount : -t.amount };
     })
     .filter((r) => !q || `${r.t.description} ${r.t.category} ${r.account} ${entityLabel(r.entity)}`.toLowerCase().includes(q))
     .sort((a, b) => b.t.date.localeCompare(a.t.date));
