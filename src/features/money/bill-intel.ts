@@ -57,8 +57,8 @@ export const frequencyFor = (c: RecurringCadence): BillFrequency => (c === "irre
 
 /* ---------------- Merchant names ---------------- */
 
-const LEAD = /^(?:PURCHASE|PIN|PINCB|POS|EFT PAYMENT|ACH|WEB|DEBIT CARD|DEBIT|CHECKCARD|RECURRING|PREAUTHORIZED|ONLINE)\b(?:\s+(?:PURCHASE|PAYMENT|DEBIT))?(?:\s+ON\s+\d{1,2}\/\d{1,2})?\s*/;
-const STOP = new Set(["COM", "WWW", "HTTPS", "HTTP", "INC", "LLC", "CO", "THE", "BILL", "PMT", "PAYMENT", "ONLINE", "AND", "OF", "ON", "SVC"]);
+const LEAD = /^(?:PURCHASE|PIN|PINCB|POS|EFT PAYMENT|ACH|WEB|DEBIT CARD|DEBIT|CHECKCARD|RECURRING|PREAUTHORIZED|ONLINE|TRANSFER|XFER)\b(?:\s+(?:PURCHASE|PAYMENT|DEBIT))?(?:\s+ON\s+\d{1,2}\/\d{1,2})?\s*/;
+const STOP = new Set(["COM", "WWW", "HTTPS", "HTTP", "INC", "LLC", "CO", "THE", "BILL", "PMT", "PAYMENT", "ONLINE", "AND", "OF", "ON", "SVC", "TO"]);
 
 /** "PURCHASE ON 04/25 NETFLIX.COM 866-579 CA" and "NETFLIX" both become "NETFLIX". */
 export function merchantKey(description: string) {
@@ -87,7 +87,15 @@ const NOT_BILL_CATEGORIES = new Set(["Transfer", "Owner draw", "Owner contributi
 const NOT_INCOME_CATEGORIES = new Set(["Transfer", "Owner draw", "Owner contribution", "Sales tax collected"]);
 const MOVEMENT = /\b(XFER|TRANSFER|ZELLE|VENMO|CASH ?APP|ATM|CASH WITHDRAWAL|WITHDRAWAL|DEPOSIT(ED)?|CHECK NUMBER|CHECK #|OVERDRAFT|NSF|REFUND|REVERSAL|RETURN|INTEREST PAID|FLASH FUNDS)\b|^CHECK\b|^RETURN-/i;
 
+// Paying a credit card or loan is a real recurring withdrawal, even when the bank calls it a transfer.
+const CARD_PAYMENT = /\b(CRD PMT|CARD ?PAYMENT|CREDIT CARD|CC PMT|EPAYMENT|E-PAYMENT|AUTOPAY|AUTO PAY|PAYMENT TO|PMT TO|LOAN PMT|LOAN PAYMENT)\b/i;
+export const isCardPayment = (t: Transaction) => t.category === "Debt payments" || CARD_PAYMENT.test(t.description);
+
+/** Bump when the rules below change, so saved scans are redone. */
+export const SCAN_RULES = 2;
+
 export function isCandidate(t: Transaction, direction: "out" | "in") {
+  if (direction === "out" && t.kind === "expense" && t.amount > 0 && t.transferId !== "imported" && isCardPayment(t) && !/\b(REFUND|REVERSAL|RETURN)\b/i.test(t.description)) return true;
   if (t.transferId) return false;
   if (direction === "out" ? t.kind !== "expense" : t.kind !== "income") return false;
   if ((direction === "out" ? NOT_BILL_CATEGORIES : NOT_INCOME_CATEGORIES).has(t.category)) return false;
@@ -271,6 +279,7 @@ export function detectRecurring(d: MoneyData, today = todayYmd()) {
     }
   }
   const scan: BillScan = {
+    rules: SCAN_RULES,
     ranAt: new Date().toISOString(),
     windowStart,
     windowEnd: today,

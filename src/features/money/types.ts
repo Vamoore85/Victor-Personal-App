@@ -189,6 +189,7 @@ export type BillScan = {
   bankFeed: number; // of those, from connected banks
   statement: number; // from imported statements or typed in
   found: number;
+  rules?: number; // version of the detection rules this scan used
 };
 
 export const INSTITUTION_TYPES = [

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { applyScan, detectRecurring } from "./bill-intel";
+import { applyScan, detectRecurring, SCAN_RULES } from "./bill-intel";
 import { money, today } from "./calc";
 import { ago } from "./intel-shared";
 import { CONFIDENCE_LABEL, ENTITIES, balances, cadenceWord, entityLabel, total, transactionRows, upcoming, type Confidence, type EntityBalance, type TxnRow, type UpcomingLine } from "./outlook";
@@ -21,7 +21,7 @@ let scannedFor = "";
 /** Finds recurring bills again whenever the banks have synced since the last look. */
 export function useBillScan(d: MoneyData | null) {
   const lastSync = d?.bankLinks.map((l) => l.lastSync ?? "").sort().at(-1) ?? "";
-  const ranAt = d?.billScan?.ranAt ?? "";
+  const ranAt = d?.billScan?.rules === SCAN_RULES ? (d?.billScan?.ranAt ?? "") : "";
   const count = d?.transactions.length ?? 0;
   useEffect(() => {
     if (!count) return;
