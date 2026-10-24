@@ -73,7 +73,9 @@ export function merchantKey(description: string) {
   return words.slice(0, 2).join(" ");
 }
 
+const NAMES: Record<string, string> = { BGE: "BG&E", "CHILD SUPPORT": "Child support", VERIZON: "Verizon" };
 export function displayName(key: string, sample: string) {
+  if (NAMES[key]) return NAMES[key];
   const name = key || sample;
   return name
     .toLowerCase()
@@ -85,17 +87,51 @@ export function displayName(key: string, sample: string) {
 
 const NOT_BILL_CATEGORIES = new Set(["Transfer", "Owner draw", "Owner contribution", "Sales tax collected", "Dining", "Groceries", "Business meals"]);
 const NOT_INCOME_CATEGORIES = new Set(["Transfer", "Owner draw", "Owner contribution", "Sales tax collected"]);
-const MOVEMENT = /\b(XFER|TRANSFER|ZELLE|VENMO|CASH ?APP|ATM|CASH WITHDRAWAL|WITHDRAWAL|DEPOSIT(ED)?|CHECK NUMBER|CHECK #|OVERDRAFT|NSF|REFUND|REVERSAL|RETURN|INTEREST PAID|FLASH FUNDS)\b|^CHECK\b|^RETURN-/i;
+const MOVEMENT = /\b(XFER|TRANSFER|ZELLE|VENMO|CASH ?APP|ATM|CASH WITHDRAWAL|WITHDRAWAL|DEPOSIT(ED)?|OVERDRAFT|NSF|REFUND|REVERSAL|RETURN|INTEREST PAID|FLASH FUNDS)\b|^RETURN-/i;
+
+/*
+ * Payments that are bills even though the bank files them as movement, and
+ * kinds of spending that only make sense added up per month. Each gets one
+ * name so its payments are looked at together.
+ */
+const CHECK = /^CHECK\b|\bCHECK ?#|\bCHECK NUMBER\b|^CHK\b/i;
+const CHILD_SUPPORT = /CHILD ?SUPPORT|\bCSEA\b|\bCSES\b|\bSDU\b|FAMILY SUPPORT|SUPPORT ENFORCEMENT/i;
+const PERSON_PAYMENT = /\b(ZELLE|VENMO|CASH ?APP)\b.*\b(TO|SENT|PAYMENT)\b|\b(TO|SENT|PAYMENT)\b.*\b(ZELLE|VENMO|CASH ?APP)\b/i;
+const NOT_OUTGOING = /\b(DEPOSIT(ED)?|REFUND|REVERSAL|RETURN(ED)?|FROM)\b|^RETURN-/i;
+/** Spending that's many small charges: one monthly total each, for the budget. */
+export const MONTHLY_TOTALS: { key: string; name: string; re: RegExp }[] = [
+  { key: "APPLE", name: "Apple (monthly total)", re: /\bAPPLE\b|APPLE ?\.?COM|\bITUNES\b|^APL\b|\bAPL\*/i },
+  { key: "GAS STATIONS", name: "Gas (monthly total)", re: /\b(SHELL|EXXON|EXXONMOBIL|MOBIL|SUNOCO|CITGO|WAWA|ROYAL FARMS|SPEEDWAY|SHEETZ|CHEVRON|VALERO|MARATHON|HIGH'?S|GULF|LUKOIL|BP|CIRCLE K|7-ELEVEN FUEL|COSTCO GAS|SAM'?S FUEL|GAS STATION|FUEL)\b/i },
+];
+const BGE = /\bBGE\b|BG ?& ?E|BALTIMORE GAS/i;
+
+/** The name a payment is grouped under when looking for bills. */
+export function groupKey(t: Transaction): string {
+  const d = t.description;
+  if (CHILD_SUPPORT.test(d)) return "CHILD SUPPORT";
+  if (BGE.test(d)) return "BGE";
+  if (/VERIZON|\bVZW\b/i.test(d)) return "VERIZON";
+  if (CHECK.test(d)) return `CHECK ${Math.round(t.amount)}`; // checks to the same payee are usually the same amount
+  for (const m of MONTHLY_TOTALS) if (m.re.test(d)) return m.key;
+  return merchantKey(d);
+}
+const totalFor = (key: string) => MONTHLY_TOTALS.find((m) => m.key === key);
 
 // Paying a credit card or loan is a real recurring withdrawal, even when the bank calls it a transfer.
 const CARD_PAYMENT = /\b(CRD PMT|CARD ?PAYMENT|CREDIT CARD|CC PMT|EPAYMENT|E-PAYMENT|AUTOPAY|AUTO PAY|PAYMENT TO|PMT TO|LOAN PMT|LOAN PAYMENT)\b/i;
 export const isCardPayment = (t: Transaction) => t.category === "Debt payments" || CARD_PAYMENT.test(t.description);
 
 /** Bump when the rules below change, so saved scans are redone. */
-export const SCAN_RULES = 3;
+export const SCAN_RULES = 4;
 
 export function isCandidate(t: Transaction, direction: "out" | "in") {
   if (direction === "out" && t.kind === "expense" && t.amount > 0 && t.transferId !== "imported" && isCardPayment(t) && !/\b(REFUND|REVERSAL|RETURN)\b/i.test(t.description)) return true;
+  if (direction === "out" && t.kind === "expense" && t.amount > 0 && t.transferId !== "imported" && !NOT_OUTGOING.test(t.description)) {
+    // Checks you wrote, child support and regular payments to a person are bills even when filed as transfers.
+    if (CHECK.test(t.description) || CHILD_SUPPORT.test(t.description) || PERSON_PAYMENT.test(t.description)) return true;
+    // Gas and Apple are added up per month even when filed as food or shopping.
+    if (!t.transferId && MONTHLY_TOTALS.some((m) => m.re.test(t.description))) return true;
+  }
   if (t.transferId) return false;
   if (direction === "out" ? t.kind !== "expense" : t.kind !== "income") return false;
   if ((direction === "out" ? NOT_BILL_CATEGORIES : NOT_INCOME_CATEGORIES).has(t.category)) return false;
@@ -133,22 +169,23 @@ const RANK = { low: 1, medium: 2, high: 3 } as const;
  * nothing. When an odd extra charge spoils the pattern (a late fee, a one-time
  * purchase), the charges of the usual amount are tried on their own.
  */
-function analyse(key: string, direction: "out" | "in", scope: Scope, txns: Transaction[], today: string): Detected | null {
-  const full = analyseOnce(key, direction, scope, txns, today);
+function analyse(key: string, direction: "out" | "in", scope: Scope, txns: Transaction[], today: string, dataEnd = today): Detected | null {
+  if (direction === "out" && totalFor(key)) return analyseMonthly(key, scope, txns, today);
+  const full = analyseOnce(key, direction, scope, txns, today, dataEnd);
   if (full?.confidence === "high") return full;
   const typical = median(txns.map((t) => t.amount));
   const usual = txns.filter((t) => Math.abs(t.amount - typical) <= typical * 0.15);
   const latest = txns.reduce((m, t) => (t.date > m ? t.date : m), "");
   // Not when the odd one out is the latest charge: then the amount has changed.
   if (usual.length === txns.length || new Set(usual.map((t) => t.date)).size < 3 || !usual.some((t) => t.date === latest)) return full;
-  const sub = analyseOnce(key, direction, scope, usual, today);
+  const sub = analyseOnce(key, direction, scope, usual, today, dataEnd);
   if (!sub || (full && RANK[sub.confidence] <= RANK[full.confidence])) return full;
   const left = txns.length - usual.length;
   sub.reasons.push(`${left} other charge${left === 1 ? "" : "s"} of a different amount left out`);
   return sub;
 }
 
-function analyseOnce(key: string, direction: "out" | "in", scope: Scope, txns: Transaction[], today: string): Detected | null {
+function analyseOnce(key: string, direction: "out" | "in", scope: Scope, txns: Transaction[], today: string, dataEnd = today): Detected | null {
   // Several charges on the same day count once (summed); the same charge seen
   // twice (bank feed and a statement, or two accounts a day apart) counts once.
   const byDay = new Map<string, { amount: number; txns: Transaction[] }>();
@@ -166,7 +203,7 @@ function analyseOnce(key: string, direction: "out" | "in", scope: Scope, txns: T
   }
   const days = [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b));
   const n = days.length;
-  if (n < 2) return null; // a one-off
+  if (n < 2) return n === 1 && direction === "out" && NAMES[key] ? seenOnce(key, scope, days[0][1].txns, today) : null; // a one-off
 
   const dates = days.map(([d]) => d);
   const amounts = days.map(([, v]) => v.amount);
@@ -187,11 +224,11 @@ function analyseOnce(key: string, direction: "out" | "in", scope: Scope, txns: T
   let cadence: RecurringCadence;
   let confidence: Detected["confidence"];
   const enough = { weekly: 5, biweekly: 4, monthly: 3, quarterly: 3, yearly: 2 } as const;
-  if (match && regular >= 0.6 && spread <= 1) {
+  if (match && regular >= 0.6) {
     cadence = match;
     reasons.push(`${n} payments, usually ${Math.round(gap)} days apart (${cadenceLabel(match).toLowerCase()})`);
     if (regular >= 0.8 && n >= enough[match] && spread <= 0.15) confidence = "high";
-    else if (spread <= 0.35) confidence = "medium";
+    else if (spread <= 0.35 || (spread <= 1.5 && regular >= 0.8 && n >= enough[match])) confidence = "medium";
     else confidence = "low";
     if (n < enough[match]) reasons.push(`Only ${n} seen in the history scanned, so the timing is a best guess`);
     if (match === "yearly" && confidence === "high") {
@@ -214,8 +251,15 @@ function analyseOnce(key: string, direction: "out" | "in", scope: Scope, txns: T
   const usualDay =
     cadence === "weekly" || cadence === "biweekly" ? weekday(last) : Math.round(median(dates.map((d) => +d.slice(8, 10))));
   let nextExpected = stepCadence(cadence, usualDay, last);
-  // Quiet for more than two cycles: it may have stopped. Say so rather than predict.
-  if (cadence !== "irregular" && dayNum(today) - dayNum(last) > 2 * CADENCE[cadence].days + 3) {
+  // The account's history stops early (an old statement, no live feed yet): the
+  // bill hasn't stopped, we just can't see past that date. Keep projecting it.
+  const historyEnds = cadence !== "irregular" && dayNum(today) - dayNum(dataEnd) > 7 && dayNum(dataEnd) - dayNum(last) <= CADENCE[cadence].days + 7;
+  if (historyEnds && nextExpected) {
+    let guard = 0;
+    while (nextExpected && nextExpected < today && guard++ < 120) nextExpected = stepCadence(cadence, usualDay, nextExpected);
+    reasons.push(`History for this account ends ${dataEnd}, so later dates are projected`);
+  } else if (cadence !== "irregular" && dayNum(today) - dayNum(last) > 2 * CADENCE[cadence].days + 3) {
+    // Quiet for more than two cycles: it may have stopped. Say so rather than predict.
     reasons.push(`Hasn't come out since ${last}; it may have stopped`);
     confidence = "low";
     nextExpected = null;
@@ -247,6 +291,56 @@ function analyseOnce(key: string, direction: "out" | "in", scope: Scope, txns: T
   };
 }
 
+/** A bill you'd always have (power, phone, child support) seen only once so far: assumed monthly. */
+function seenOnce(key: string, scope: Scope, txns: Transaction[], today: string): Detected {
+  const last = txns[0].date;
+  const usualDay = +last.slice(8, 10);
+  let next = stepCadence("monthly", usualDay, last);
+  let guard = 0;
+  while (next && next < today && guard++ < 60) next = stepCadence("monthly", usualDay, next);
+  const amount = round2(txns.reduce((s, t) => s + t.amount, 0));
+  return {
+    key: `out|${key}|${bucketOf(scope)}`, direction: "out", merchant: displayName(key, txns[0].description), scope, cadence: "monthly",
+    typical: amount, min: amount, max: amount, firstDate: last, lastDate: last, usualDay, nextExpected: next, confidence: "low",
+    reasons: [`Seen once (${last}); assumed monthly until more payments show up`],
+    occurrences: txns.map((t) => ({ txnId: t.id, date: t.date, amount: t.amount, accountId: t.accountId, source: t.plaidId ? ("bank" as const) : ("statement" as const) })),
+    accountIds: [...new Set(txns.map((t) => t.accountId))], category: mostCommon(txns.map((t) => t.category)),
+  };
+}
+
+/** Many small charges (Apple, gas) as one monthly amount: the usual month's total, due on the 1st. */
+function analyseMonthly(key: string, scope: Scope, txns: Transaction[], today: string): Detected | null {
+  const thisMonth = today.slice(0, 7);
+  const byMonth = new Map<string, number>();
+  for (const t of txns) if (t.date.slice(0, 7) < thisMonth) byMonth.set(t.date.slice(0, 7), round2((byMonth.get(t.date.slice(0, 7)) ?? 0) + t.amount));
+  const months = [...byMonth.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-12);
+  if (months.length < 2) return null;
+  const totals = months.map(([, v]) => v);
+  const typical = round2(median(totals));
+  const dates = txns.map((t) => t.date).sort();
+  const nextMonth = new Date(Date.UTC(+today.slice(0, 4), +today.slice(5, 7), 1)).toISOString().slice(0, 10);
+  const occurrences: RecurringOccurrence[] = txns.map((t) => ({ txnId: t.id, date: t.date, amount: t.amount, accountId: t.accountId, source: t.plaidId ? ("bank" as const) : ("statement" as const) }));
+  return {
+    key: `out|${key}|${bucketOf(scope)}`,
+    direction: "out",
+    merchant: totalFor(key)!.name,
+    scope,
+    cadence: "monthly",
+    typical,
+    min: round2(Math.min(...totals)),
+    max: round2(Math.max(...totals)),
+    firstDate: dates[0],
+    lastDate: dates[dates.length - 1],
+    usualDay: 1,
+    nextExpected: nextMonth,
+    confidence: months.length >= 3 ? "medium" : "low",
+    reasons: [`${txns.length} charges over ${months.length} months, added up per month`, "Shown on the 1st as one budget line"],
+    occurrences,
+    accountIds: [...new Set(txns.map((t) => t.accountId))],
+    category: mostCommon(txns.map((t) => t.category)),
+  };
+}
+
 function mostCommon(xs: string[]) {
   const counts = new Map<string, number>();
   for (const x of xs) counts.set(x, (counts.get(x) ?? 0) + 1);
@@ -259,12 +353,14 @@ export function detectRecurring(d: MoneyData, today = todayYmd()) {
   const scopeOf = new Map(d.accounts.map((a) => [a.id, a.scope ?? "personal"]));
   const unassigned = new Set(d.accounts.filter((a) => a.needsEntity).map((a) => a.id)); // no company yet: not looked at
   const inWindow = d.transactions.filter((t) => t.date >= windowStart && t.date <= today);
+  const dataEnd = new Map<string, string>(); // newest transaction on each account
+  for (const t of inWindow) if ((dataEnd.get(t.accountId) ?? "") < t.date) dataEnd.set(t.accountId, t.date);
   const found: Detected[] = [];
   for (const direction of ["out", "in"] as const) {
     const groups = new Map<string, { scope: Scope; key: string; txns: Transaction[] }>();
     for (const t of inWindow) {
       if (unassigned.has(t.accountId) || !isCandidate(t, direction)) continue;
-      const key = merchantKey(t.description);
+      const key = groupKey(t);
       if (!key) continue;
       const scope = scopeOf.get(t.accountId) ?? "personal";
       const g = `${bucketOf(scope)}|${key}`;
@@ -275,7 +371,8 @@ export function detectRecurring(d: MoneyData, today = todayYmd()) {
     for (const g of groups.values()) {
       // A finding takes the owner of the account most of its payments came from.
       const scope = mostCommon(g.txns.map((t) => scopeOf.get(t.accountId) ?? "personal")) as Scope;
-      const f = analyse(g.key, direction, scope, g.txns, today);
+      const ends = [...new Set(g.txns.map((t) => t.accountId))].map((id) => dataEnd.get(id) ?? today).sort();
+      const f = analyse(g.key, direction, scope, g.txns, today, ends[ends.length - 1]);
       if (f) found.push(f);
     }
   }

@@ -1,4 +1,4 @@
-import { isCandidate, merchantKey } from "@/features/money/bill-intel";
+import { groupKey, isCandidate } from "@/features/money/bill-intel";
 import { readDoc, writeDoc } from "@/lib/db";
 import { EMPTY_DATA, type MoneyData } from "@/features/money/types";
 
@@ -76,12 +76,13 @@ export function billDiag(data: unknown) {
     }
     const last = ts.reduce((m, t) => (t.date > m ? t.date : m), "");
     const cats = [...new Set(ts.map((t) => t.category))].slice(0, 4).join("|");
-    const keys = [...new Set(ts.map((t) => merchantKey(t.description)))].slice(0, 4).join("|");
+    const keys = [...new Set(ts.filter((t) => isCandidate(t, "out")).map(groupKey))].join("|");
+    const shownKeys = keys.split("|").filter((k) => !k.startsWith("CHECK ")).slice(0, 8).join("|");
     const finds = d.recurring
       .filter((f) => f.direction === "out" && keys.split("|").some((k) => k && f.key.includes(`|${k}|`)))
-      .map((f) => `${f.cadence}/${f.confidence}/${f.status}/next=${f.nextExpected ?? "none"}`)
+      .map((f) => `${f.key.split("|")[1].replace(/^CHECK .*/, "CHECK")}:${f.cadence}/${f.confidence}/${f.status}/next=${f.nextExpected ?? "none"}`)
       .join(",");
-    out.push(`${name}: n=${ts.length} candidates=${cand} accts=${[...byAcct].map(([k, v]) => `${k}:${v}`).join(",")} last=${last} cats=${cats} keys=${keys} findings=${finds || "none"}`);
+    out.push(`${name}: n=${ts.length} candidates=${cand} accts=${[...byAcct].map(([k, v]) => `${k}:${v}`).join(",")} last=${last} cats=${cats} keys=${shownKeys} findings=${finds || "none"}`);
   }
   return out.join(" || ") + ` | scan=${d.billScan ? `${d.billScan.found}@${d.billScan.windowEnd}/rules${d.billScan.rules}` : "none"} recurring=${d.recurring.length}`;
 }
