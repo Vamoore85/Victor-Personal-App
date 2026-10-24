@@ -122,7 +122,7 @@ const CARD_PAYMENT = /\b(CRD PMT|CARD ?PAYMENT|CREDIT CARD|CC PMT|EPAYMENT|E-PAY
 export const isCardPayment = (t: Transaction) => t.category === "Debt payments" || CARD_PAYMENT.test(t.description);
 
 /** Bump when the rules below change, so saved scans are redone. */
-export const SCAN_RULES = 4;
+export const SCAN_RULES = 5;
 
 export function isCandidate(t: Transaction, direction: "out" | "in") {
   if (direction === "out" && t.kind === "expense" && t.amount > 0 && t.transferId !== "imported" && isCardPayment(t) && !/\b(REFUND|REVERSAL|RETURN)\b/i.test(t.description)) return true;
@@ -360,9 +360,11 @@ export function detectRecurring(d: MoneyData, today = todayYmd()) {
     const groups = new Map<string, { scope: Scope; key: string; txns: Transaction[] }>();
     for (const t of inWindow) {
       if (unassigned.has(t.accountId) || !isCandidate(t, direction)) continue;
-      const key = groupKey(t);
-      if (!key) continue;
       const scope = scopeOf.get(t.accountId) ?? "personal";
+      let key = groupKey(t);
+      if (!key) continue;
+      // Your word (2026-10-24): checks from the personal account are child support.
+      if (direction === "out" && scope === "personal" && key.startsWith("CHECK ")) key = "CHILD SUPPORT";
       const g = `${bucketOf(scope)}|${key}`;
       const group = groups.get(g) ?? { scope, key, txns: [] };
       group.txns.push(t);

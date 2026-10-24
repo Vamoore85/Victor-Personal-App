@@ -22,7 +22,7 @@ const find = (d: MoneyData, name: RegExp) => detectRecurring(d, TODAY).found.fin
 
 test("checks, child support, BG&E, Verizon and card payments are found as bills", () => {
   const d = data([
-    ...months(1, 10, 3).map((day) => t("1111", day, 500, "CHECK 1043", "Transfer")),
+    ...months(1, 10, 3).map((day) => t("2222", day, 500, "CHECK 1043", "Transfer")),
     ...months(1, 10, 15).map((day) => t("1111", day, 300, "MD CHILD SUPPORT SDU PAYMENT", "Transfer")),
     ...months(1, 10, 20).map((day, i) => t("1111", day, [80, 210, 190, 120, 60, 95, 150, 175, 90, 70][i], "BGE ONLINE PMT")),
     ...months(1, 10, 9).map((day, i) => t("1111", day, 120 + i, "VERIZON WIRELESS PAYMENTS")),
@@ -64,4 +64,13 @@ test("deposits, refunds and money in are still not bills", () => {
     ...months(1, 6, 4).map((day) => t("1111", day, 20, "ZELLE FROM A FRIEND", "Transfer")),
   ]);
   assert.equal(detectRecurring(d, TODAY).found.filter((f) => f.direction === "out").length, 0);
+});
+
+test("checks from the personal account are child support, even when the amount changes", () => {
+  const d = data(months(1, 10, 1).map((day, i) => t("1111", day, i % 2 ? 400 : 450, `CHECK ${2000 + i}`, "Other")));
+  const f = find(d, /Child support/);
+  assert.ok(f);
+  assert.equal(f.cadence, "monthly");
+  assert.equal(f.nextExpected, "2026-11-01");
+  assert.equal(detectRecurring(d, TODAY).found.filter((x) => /^Check/.test(x.merchant)).length, 0);
 });
