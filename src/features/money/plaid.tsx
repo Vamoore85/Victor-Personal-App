@@ -310,6 +310,8 @@ export function useAutoSync(data: MoneyData | null) {
         if (needsYou(l)) return false;
         // A failed bank is retried once each time the page opens, not in a loop.
         if (l.error) return !tried.current.has(l.id);
+        // A connected account with no balance from the bank yet is refreshed once per visit.
+        if (!tried.current.has(l.id) && d.accounts.some((a) => a.plaid?.linkId === l.id && !a.bankBalance)) return true;
         return age(l) > (l.historyStatus === HISTORY_DONE ? STALE_MS : RETRY_MS);
       });
       due.forEach((l) => tried.current.add(l.id));

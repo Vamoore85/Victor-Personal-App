@@ -95,6 +95,18 @@ export const POST = handle(async (body) => {
         return row;
       }
       try {
+        // Which accounts the bank itself reports, and whether it sent a balance for each (yes/no only).
+        const live = await plaid<{ accounts: { account_id: string; mask: string | null; type: string; balances: { current: number | null; available: number | null } }[] }>(creds, "/accounts/get", { access_token: token });
+        row.bankAccounts = live.accounts.map((a) => ({
+          last4: a.mask,
+          type: a.type,
+          balance: a.balances.current !== null || a.balances.available !== null,
+          inApp: d!.accounts.some((x) => x.plaid?.linkId === l.id && x.plaid.accountId === a.account_id),
+        }));
+      } catch (e) {
+        row.bankAccounts = e instanceof PlaidError ? e.code : "UNREACHABLE";
+      }
+      try {
         const item = await plaid<{ item: { error: { error_code: string } | null }; status?: { transactions?: { last_successful_update?: string | null } } }>(creds, "/item/get", { access_token: token });
         row.bankError = item.item.error?.error_code ?? null;
         row.plaidLastUpdate = item.status?.transactions?.last_successful_update ?? null;
@@ -104,9 +116,30 @@ export const POST = handle(async (body) => {
       return row;
     }),
   );
+  // Every account the app shows: its entity, whether a live bank connection feeds it, and its balance's age. No amounts.
+  const liveLinks = new Map((d?.bankLinks ?? []).map((l) => [l.id, l]));
+  out.accounts = (d?.accounts ?? []).map((a) => {
+    const link = a.plaid ? liveLinks.get(a.plaid.linkId) : undefined;
+    const bb = a.bankBalance;
+    return {
+      last4: a.last4 ?? null,
+      entity: a.scope ?? "personal",
+      type: a.type,
+      feed: !a.plaid ? "none" : link ? "live" : "removed-link",
+      balance: !bb ? "none" : bb.current === null && bb.available === null ? "empty" : "ok",
+      balanceAgeH: bb ? Math.round((Date.now() - new Date(bb.asOf).getTime()) / 36e5) : null,
+      bankTxns: d!.transactions.filter((t) => t.accountId === a.id && t.plaidId).length,
+      otherTxns: d!.transactions.filter((t) => t.accountId === a.id && !t.plaidId).length,
+    };
+  });
   const links = out.links as Record<string, unknown>[];
   console.log(
     `plaid health: db=${(out.database as { ok: boolean }).ok} keys=${source}/${keys.ok ?? "-"} links=${links.length} tokenBad=${links.filter((l) => l.tokenOk === false).length} bankErrors=${links.map((l) => l.bankError).filter(Boolean).join(",") || "none"} bankTxns=${(out.money as { bankTransactions?: number } | null)?.bankTransactions ?? "-"}`,
+  );
+  console.log(
+    `plaid health accounts: ${(out.accounts as Record<string, unknown>[]).map((a) => `${a.last4 ?? "----"}/${a.entity}/${a.type}/feed=${a.feed}/bal=${a.balance}${a.balanceAgeH !== null ? `@${a.balanceAgeH}h` : ""}/tx=${a.bankTxns}+${a.otherTxns}`).join(" ")} | bank reports: ${links
+      .map((l) => (Array.isArray(l.bankAccounts) ? (l.bankAccounts as { last4: string | null; type: string; balance: boolean; inApp: boolean }[]).map((b) => `${b.last4 ?? "----"}/${b.type}/bal=${b.balance}/inApp=${b.inApp}`).join(" ") : String(l.bankAccounts ?? "-")))
+      .join(" ; ")}`,
   );
   return out;
 });

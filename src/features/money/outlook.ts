@@ -20,46 +20,84 @@ export const entityOf = (a: Account | undefined): Scope => a?.scope ?? "personal
 
 const isCash = (a: Account) => a.type === "checking" || a.type === "savings";
 
-export type EntityBalance = {
-  entity: Scope;
-  available: number; // from bank balances synced in the last day
-  counted: number; // accounts that gave a current bank balance
-  stale: number; // checking/savings accounts without a current bank balance (not counted)
-  accounts: { name: string; last4?: string; amount: number | null }[]; // each checking/savings account, by its bank name
-  cards: { name: string; last4?: string; owed: number | null; credit: number | null }[]; // credit cards and loans: money owed, not cash
-  owed: number; // total owed on current card and loan balances
-  asOf: string | null;
+/** Where an account's balance comes from, so "not current" always says why. */
+export type BalanceState =
+  | "bank" // the bank's balance from the last sync
+  | "bank-old" // the bank's balance, but the last sync is over a day old (still shown and counted)
+  | "waiting" // connected, but the bank hasn't sent a balance yet
+  | "unlinked"; // not connected to a bank (typed in or filled from statements)
+
+export type AccountLine = {
+  name: string;
+  last4?: string;
+  amount: number | null; // cash: available (else current); cards: owed
+  credit?: number | null; // cards: credit left
+  state: BalanceState;
+  asOf: string | null; // when the bank gave this balance
+  lastSync: string | null; // last successful sync of its bank connection
+  twin?: string; // the same account number is connected under another entity
 };
 
-/** Money available now in checking and savings, per entity, from current bank balances only. */
+export type EntityBalance = {
+  entity: Scope;
+  available: number; // cash in checking and savings, from the banks' balances
+  counted: number; // accounts with a bank balance
+  stale: number; // checking/savings accounts without a bank balance (not counted)
+  old: number; // of the counted ones, how many are over a day old
+  accounts: AccountLine[]; // checking and savings, by bank name
+  cards: AccountLine[]; // credit cards and loans: money owed, not cash
+  owed: number; // total owed on cards and loans with a bank balance
+  asOf: string | null; // oldest bank balance counted
+};
+
+const isDebt = (a: Account) => a.type === "credit" || a.type === "loan";
+
+/**
+ * Each entity's cash from the balances the banks sent on the last sync. A
+ * balance the bank sent is always used, however old; it's marked with its
+ * time, never swapped for "not current". Card and loan balances are owed, not cash.
+ */
 export function balances(d: MoneyData, now = Date.now()): EntityBalance[] {
+  const links = new Map(d.bankLinks.map((l) => [l.id, l]));
+  const line = (a: Account): AccountLine => {
+    const link = a.plaid ? links.get(a.plaid.linkId) : undefined;
+    const bb = a.bankBalance;
+    const lastSync = link?.lastSync ?? null;
+    const has = !!bb && (bb.current !== null || bb.available !== null);
+    const state: BalanceState = !link ? (has ? "bank-old" : "unlinked") : !has ? "waiting" : now - new Date(bb!.asOf).getTime() > FRESH_HOURS * 3600_000 ? "bank-old" : "bank";
+    const twin = !link
+      ? d.accounts.find((x) => x.id !== a.id && x.last4 && x.last4 === a.last4 && isDebt(x) === isDebt(a) && x.plaid && links.has(x.plaid.linkId))
+      : undefined;
+    const amount = !has ? null : isDebt(a) ? (bb!.current ?? 0) : (bb!.available ?? bb!.current ?? 0);
+    return {
+      name: a.name,
+      last4: a.last4,
+      amount,
+      credit: isDebt(a) && has ? (bb!.available ?? null) : undefined,
+      state,
+      asOf: has ? bb!.asOf : null,
+      lastSync,
+      twin: twin ? entityLabel(entityOf(twin)) : undefined,
+    };
+  };
+  const r2 = (n: number) => Math.round(n * 100) / 100;
   return ENTITIES.map(({ id }) => {
-    let available = 0;
-    let counted = 0;
-    let stale = 0;
-    let asOf: string | null = null;
-    const accounts: EntityBalance["accounts"] = [];
-    const cards: EntityBalance["cards"] = [];
-    let owed = 0;
-    for (const a of d.accounts.filter((x) => (x.type === "credit" || x.type === "loan") && entityOf(x) === id)) {
-      const bb = a.bankBalance;
-      const fresh = bb && now - new Date(bb.asOf).getTime() <= FRESH_HOURS * 3600_000;
-      cards.push({ name: a.name, last4: a.last4, owed: fresh ? (bb.current ?? 0) : null, credit: fresh ? (bb.available ?? null) : null });
-      if (fresh) owed += bb.current ?? 0;
-    }
-    for (const a of d.accounts.filter((x) => isCash(x) && entityOf(x) === id)) {
-      const bb = a.bankBalance;
-      const fresh = bb && now - new Date(bb.asOf).getTime() <= FRESH_HOURS * 3600_000;
-      accounts.push({ name: a.name, last4: a.last4, amount: fresh ? (bb.available ?? bb.current ?? 0) : null });
-      if (!fresh) {
-        stale++;
-        continue;
-      }
-      available += bb.available ?? bb.current ?? 0;
-      counted++;
-      if (!asOf || bb.asOf > asOf) asOf = bb.asOf;
-    }
-    return { entity: id, available: Math.round(available * 100) / 100, counted, stale, accounts, cards, owed: Math.round(owed * 100) / 100, asOf };
+    const mine = d.accounts.filter((x) => entityOf(x) === id);
+    const accounts = mine.filter(isCash).map(line);
+    const cards = mine.filter(isDebt).map(line);
+    const counted = accounts.filter((x) => x.amount !== null);
+    const asOf = counted.map((x) => x.asOf!).sort()[0] ?? null;
+    return {
+      entity: id,
+      available: r2(counted.reduce((s, x) => s + x.amount!, 0)),
+      counted: counted.length,
+      stale: accounts.length - counted.length,
+      old: counted.filter((x) => x.state === "bank-old").length,
+      accounts,
+      cards,
+      owed: r2(cards.reduce((s, x) => s + (x.amount ?? 0), 0)),
+      asOf,
+    };
   });
 }
 

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { applyScan, detectRecurring, SCAN_RULES } from "./bill-intel";
 import { money, today } from "./calc";
 import { ago } from "./intel-shared";
-import { CONFIDENCE_LABEL, ENTITIES, balances, cadenceWord, entityLabel, total, transactionRows, upcoming, type Confidence, type EntityBalance, type TxnRow, type UpcomingLine } from "./outlook";
+import { CONFIDENCE_LABEL, ENTITIES, balances, type AccountLine, cadenceWord, entityLabel, total, transactionRows, upcoming, type Confidence, type EntityBalance, type TxnRow, type UpcomingLine } from "./outlook";
 import { syncAll, useSyncActivity } from "./plaid";
 import { freshness } from "./briefing";
 import { newId, setMoneyData } from "./store";
@@ -129,11 +129,51 @@ export function Overview({ data, onSettings }: { data: MoneyData; onSettings: ()
             query={query}
             hasBankTxns={hasBankTxns}
             linked={data.bankLinks.length > 0}
+            onSettings={onSettings}
           />
         ))}
       </div>
       {lines.some((l) => l.predicted) && <p className="text-xs text-zinc-500">Bills are predicted from your bank history unless marked Confirmed; amounts are the typical past amount.</p>}
     </div>
+  );
+}
+
+/** One account or card: the bank's balance with its time, or exactly why there isn't one. */
+function AccountRow({ a, card, onConnect }: { a: AccountLine; card?: boolean; onConnect: () => void }) {
+  const why =
+    a.state === "waiting"
+      ? `Waiting for the bank's balance${a.lastSync ? ` · last sync ${ago(a.lastSync)}` : ""} · refreshing`
+      : a.state === "unlinked"
+        ? a.twin
+          ? `Not connected here; the same account number is connected under ${a.twin}`
+          : "Not connected to a bank"
+        : a.state === "bank-old"
+          ? `Bank balance ${a.asOf ? ago(a.asOf) : ""}${a.lastSync ? "" : " · bank disconnected"}`
+          : null;
+  return (
+    <li className="flex flex-col">
+      <span className="flex justify-between gap-2">
+        <span className="truncate">
+          {a.name}
+          {a.last4 && ` ··${a.last4}`}
+        </span>
+        <span className="flex shrink-0 flex-col items-end tabular-nums">
+          {a.amount === null ? (
+            a.state === "unlinked" ? (
+              <button className="underline hover:text-zinc-900 dark:hover:text-zinc-100" onClick={onConnect}>
+                Connect
+              </button>
+            ) : (
+              <span>—</span>
+            )
+          ) : (
+            <span className="text-zinc-700 dark:text-zinc-200">{card ? `${money(a.amount)} owed` : money(a.amount)}</span>
+          )}
+          {card && a.credit != null && <span className="text-[11px] text-zinc-400">{money(a.credit)} credit left</span>}
+        </span>
+      </span>
+      {why && <span className="text-[11px] text-amber-700 dark:text-amber-400" data-testid="acct-why">{why}</span>}
+    </li>
   );
 }
 
@@ -144,7 +184,9 @@ function EntityPanel({
   query,
   hasBankTxns,
   linked,
+  onSettings,
 }: {
+  onSettings: () => void;
   b: EntityBalance;
   lines: UpcomingLine[];
   txns: TxnRow[];
@@ -162,39 +204,24 @@ function EntityPanel({
       <div className="flex flex-col gap-1 p-4 sm:p-5">
         <h3 className="text-sm font-medium text-zinc-500">{entityLabel(b.entity)}</h3>
         <p className="text-3xl font-semibold tabular-nums tracking-tight" data-testid={`bal-${b.entity}`}>{b.counted ? money(b.available) : "—"}</p>
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-zinc-500" data-testid={`bal-note-${b.entity}`}>
           {b.counted
-            ? `Cash available now${b.stale ? ` · ${b.stale} account${b.stale === 1 ? "" : "s"} not current` : ""}`
-            : b.stale
-              ? "No current bank balance"
+            ? `Cash available${b.asOf ? ` · bank balance ${ago(b.asOf)}` : ""}${b.stale ? ` · ${b.stale} account${b.stale === 1 ? "" : "s"} without a balance` : ""}`
+            : b.accounts.length
+              ? "No bank balance yet"
               : "No checking or savings account"}
         </p>
         {b.accounts.length > 0 && (
-          <ul className="mt-2 flex flex-col gap-0.5 text-xs text-zinc-500" data-testid={`accts-${b.entity}`}>
+          <ul className="mt-2 flex flex-col gap-1 text-xs text-zinc-500" data-testid={`accts-${b.entity}`}>
             {b.accounts.map((a, i) => (
-              <li key={i} className="flex justify-between gap-2">
-                <span className="truncate">
-                  {a.name}
-                  {a.last4 && ` ··${a.last4}`}
-                </span>
-                <span className="shrink-0 tabular-nums">{a.amount === null ? "not current" : money(a.amount)}</span>
-              </li>
+              <AccountRow key={i} a={a} onConnect={onSettings} />
             ))}
           </ul>
         )}
         {b.cards.length > 0 && (
-          <ul className="mt-2 flex flex-col gap-0.5 border-t border-dashed border-zinc-200 pt-2 text-xs text-zinc-500 dark:border-zinc-800" data-testid={`cards-${b.entity}`}>
+          <ul className="mt-2 flex flex-col gap-1 border-t border-dashed border-zinc-200 pt-2 text-xs text-zinc-500 dark:border-zinc-800" data-testid={`cards-${b.entity}`}>
             {b.cards.map((c, i) => (
-              <li key={i} className="flex justify-between gap-2">
-                <span className="truncate">
-                  {c.name}
-                  {c.last4 && ` ··${c.last4}`}
-                </span>
-                <span className="flex shrink-0 flex-col items-end tabular-nums">
-                  <span>{c.owed === null ? "not current" : `${money(c.owed)} owed`}</span>
-                  {c.credit !== null && <span className="text-[11px] text-zinc-400">{money(c.credit)} credit left</span>}
-                </span>
-              </li>
+              <AccountRow key={i} a={c} card onConnect={onSettings} />
             ))}
             {b.cards.length > 1 && (
               <li className="flex justify-between gap-2 font-medium">
