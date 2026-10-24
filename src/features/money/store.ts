@@ -110,6 +110,34 @@ function setRev(n: number) {
   }
 }
 
+/**
+ * Bank connections can't be recreated without signing in to the bank again,
+ * so when the database's copy wins, any connection only this browser has (with
+ * its accounts and transactions) is kept and saved back rather than dropped.
+ */
+function keepLocalLinks(server: MoneyData, local: MoneyData): { data: MoneyData; added: boolean } {
+  const known = new Set(server.bankLinks.map((l) => l.id));
+  const extra = local.bankLinks.filter((l) => !known.has(l.id));
+  if (!extra.length) return { data: server, added: false };
+  const ids = new Set(extra.map((l) => l.id));
+  const haveAccounts = new Set(server.accounts.map((a) => a.id));
+  const accounts = local.accounts.filter((a) => a.plaid && ids.has(a.plaid.linkId) && !haveAccounts.has(a.id));
+  const acctIds = new Set(accounts.map((a) => a.id));
+  const haveTxns = new Set(server.transactions.map((t) => t.id));
+  const transactions = local.transactions.filter((t) => acctIds.has(t.accountId) && !haveTxns.has(t.id));
+  return {
+    data: { ...server, bankLinks: [...server.bankLinks, ...extra], accounts: [...server.accounts, ...accounts], transactions: [...server.transactions, ...transactions] },
+    added: true,
+  };
+}
+
+/** The request body, gzipped when the browser can: a few years of bank history is several megabytes as JSON. */
+async function packBody(text: string): Promise<{ body: BodyInit; headers: Record<string, string> }> {
+  if (typeof CompressionStream === "undefined" || text.length < 100_000) return { body: text, headers: { "Content-Type": "application/json" } };
+  const zipped = await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"))).blob();
+  return { body: zipped, headers: { "Content-Type": "application/octet-stream", "X-Body-Encoding": "gzip" } };
+}
+
 const hasContent = (d: MoneyData) => d.accounts.length + d.transactions.length + d.bills.length + d.institutions.length > 0;
 
 async function startCloud() {
@@ -143,11 +171,12 @@ async function startCloud() {
     // The database is the source of truth.
     setRev(json.rev);
     const fromDb = normalize(json.data);
-    const sorted = autoSort(fromDb);
+    const kept = keepLocalLinks(fromDb, local);
+    const sorted = autoSort(kept.data);
     save(sorted);
     dirty = false;
     setCloud("saved");
-    if (sorted !== fromDb) schedulePush(); // save the newly sorted categories back
+    if (sorted !== fromDb) schedulePush(); // save the newly sorted categories (or kept connections) back
   } catch {
     started = false; // retry on the next change
     loaded = false;
@@ -162,26 +191,66 @@ function schedulePush() {
   timer = setTimeout(() => void push(), 800);
 }
 
-async function push() {
+let pushJob: Promise<void> | null = null;
+
+function push(): Promise<void> {
+  if (pushing && pushJob) return pushJob;
+  pushJob = pushNow().finally(() => (pushJob = null));
+  return pushJob;
+}
+
+/** Saves anything waiting, now. Resolves once the database has it (or saving failed). */
+export async function flushCloud() {
+  clearTimeout(timer);
+  if (pushJob) await pushJob;
+  if (dirty && loaded && cloud !== "off") await push();
+}
+
+/**
+ * Reads the database's copy again, after the server changed it (a bank sync
+ * runs there). Anything still unsaved here is saved first.
+ */
+export async function reloadFromCloud(): Promise<boolean> {
+  await flushCloud();
+  try {
+    const res = await fetch("/api/money", { cache: "no-store" });
+    const json = await res.json();
+    if (!res.ok || !json.configured || json.data === null) return false;
+    setRev(json.rev);
+    const kept = keepLocalLinks(normalize(json.data), read());
+    save(autoSort(kept.data));
+    loaded = true;
+    dirty = kept.added;
+    setCloud(dirty ? "saving" : "saved");
+    if (dirty) schedulePush();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True once this page has the database's copy, so the server and this browser agree. */
+export const cloudReady = () => loaded && cloud !== "off";
+
+async function pushNow() {
   if (pushing || !dirty) return;
   if (!loaded) return void startCloud(); // pushed once the database's copy is in
   pushing = true;
   dirty = false;
   setCloud("saving");
   try {
-    const res = await fetch("/api/money", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rev, data: read() }),
-    });
+    const packed = await packBody(JSON.stringify({ rev, data: read() }));
+    const res = await fetch("/api/money", { method: "PUT", ...packed });
     const json = await res.json().catch(() => ({}));
     if (res.status === 409) {
-      // Saved from another device first: take that version.
+      // Saved from another device first: take that version, keeping any bank connection only this browser has.
       setRev(json.rev);
-      save(normalize(json.data));
-      setCloud("saved");
+      const kept = keepLocalLinks(normalize(json.data), read());
+      save(kept.data);
+      if (kept.added) dirty = true;
+      setCloud(kept.added ? "saving" : "saved");
     } else if (!res.ok) {
-      cloudError = json.error ?? "";
+      cloudError = json.error ?? (res.status === 413 ? "Your money data is too large to save in one go." : `The server answered ${res.status}.`);
       dirty = true;
       setCloud("error");
     } else {

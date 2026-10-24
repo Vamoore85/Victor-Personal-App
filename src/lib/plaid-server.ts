@@ -107,7 +107,8 @@ export async function credsFrom(body: Record<string, unknown>): Promise<PlaidCre
 }
 
 export async function plaid<T>(creds: PlaidCreds, path: string, body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(HOSTS[creds.env] + path, {
+  // PLAID_TEST_HOST points at a local stand-in for Plaid in tests; never set in Vercel.
+  const res = await fetch((process.env.PLAID_TEST_HOST || HOSTS[creds.env]) + path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ client_id: creds.clientId, secret: creds.secret, ...body }),

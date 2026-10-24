@@ -1,3 +1,4 @@
+import { gunzipSync, gzipSync } from "node:zlib";
 import { connection } from "next/server";
 import { databaseUrl, dbConfigured, readDoc, writeDoc } from "@/lib/db";
 import { applyPendingImport } from "@/lib/pending-import";
@@ -7,7 +8,7 @@ import { sameOrigin, signedIn } from "@/lib/plaid-server";
 // sends each change here with the revision it started from.
 
 const KEY = "money";
-const MAX_BYTES = 8 * 1024 * 1024;
+const MAX_BYTES = 40 * 1024 * 1024;
 
 function guard(req: Request) {
   if (!sameOrigin(req)) return Response.json({ error: "Forbidden" }, { status: 403 });
@@ -58,7 +59,7 @@ export async function GET(req: Request) {
       const saved = await writeDoc(KEY, doc?.rev ?? 0, merged);
       if (saved.ok) doc = { rev: saved.rev, data: merged };
     }
-    return Response.json({ configured: true, rev: doc?.rev ?? 0, data: doc?.data ?? null });
+    return packed({ configured: true, rev: doc?.rev ?? 0, data: doc?.data ?? null });
   } catch (e) {
     return failed(e);
   }
@@ -68,7 +69,8 @@ export async function PUT(req: Request) {
   const denied = guard(req);
   if (denied) return denied;
   if (!dbConfigured()) return Response.json({ error: "No database yet." }, { status: 503 });
-  const text = await req.text();
+  // Big saves arrive gzipped, so years of bank history fit under the hosting's 4.5 MB request limit.
+  const text = req.headers.get("x-body-encoding") === "gzip" ? gunzipSync(Buffer.from(await req.arrayBuffer())).toString("utf8") : await req.text();
   if (text.length > MAX_BYTES) return Response.json({ error: "Too much data to save at once." }, { status: 413 });
   let body: { rev?: unknown; data?: unknown };
   try {
@@ -106,4 +108,11 @@ function wrongPasswordHint(url: string) {
   if (/[@#/?%:]/.test(pw)) clues.push("the password has a symbol (@ # / ? % :) that can break the link");
   const sum = clues.length ? ` Clues: ${clues.join("; ")}.` : "";
   return `Supabase rejected the password in the link (a ${kind} link; the password in it is ${pw.length} characters long).${sum} Check it matches the new database password exactly, then save the link again in Vercel.`;
+}
+
+// Large answers go out gzipped: the hosting refuses function responses over 4.5 MB.
+function packed(value: unknown) {
+  const text = JSON.stringify(value);
+  if (text.length < 100_000) return new Response(text, { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+  return new Response(gzipSync(text), { headers: { "Content-Type": "application/json", "Content-Encoding": "gzip", "Cache-Control": "no-store" } });
 }

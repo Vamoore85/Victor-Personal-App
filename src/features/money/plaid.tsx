@@ -1,12 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
-import { getMoneyData, setMoneyData, newId, useCloudState } from "./store";
+import { cloudReady, flushCloud, getMoneyData, reloadFromCloud, setMoneyData, newId, useCloudState } from "./store";
 import { useDefaultScope, ScopeBadge, SCOPES } from "./scope";
-import { isCompany, type Scope, type Account, type AccountType, type BankLink, type MoneyData, type Transaction } from "./types";
-import { isLiability } from "./calc";
+import type { Scope, BankLink, MoneyData } from "./types";
 import { Card, Empty, buttonClass, ghostButtonClass } from "./ui";
-import { autoCategory, ruleCategory } from "./books";
 import { HISTORY_DONE, saveBriefing } from "./briefing";
 
 /*
@@ -29,18 +27,8 @@ declare global {
   }
 }
 
-type SyncAccount = { id: string; name: string; mask: string | null; type: string; subtype: string | null; current: number | null; available?: number | null };
-type SyncTxn = { id: string; accountId: string; amount: number; date: string; name: string; pending: boolean; category: string };
-type SyncResult = {
-  cursor: string;
-  hasMore?: boolean;
-  updateStatus?: string;
-  institution: string;
-  accounts: SyncAccount[];
-  added: SyncTxn[];
-  modified: SyncTxn[];
-  removed: string[];
-};
+import { applySync, type SyncResult } from "./plaid-apply";
+export { applySync, categoryFor, sameCharge } from "./plaid-apply";
 
 export { HISTORY_DONE };
 
@@ -113,202 +101,107 @@ async function openLink(linkToken: string) {
   });
 }
 
-function accountType(a: SyncAccount): AccountType {
-  if (a.type === "credit") return "credit";
-  if (a.type === "loan") return "loan";
-  if (a.type === "investment" || a.type === "brokerage") return "investment";
-  if (a.subtype === "savings" || a.subtype === "money market" || a.subtype === "cd") return "savings";
-  return "checking";
-}
-
-/** Maps Plaid's spending categories onto the Financial Center's. */
-export function categoryFor(plaidCategory: string, income: boolean) {
-  const [primary, detailed = ""] = plaidCategory.split("|");
-  if (income) return detailed === "INCOME_WAGES" ? "Salary" : "Other income";
-  switch (primary) {
-    case "FOOD_AND_DRINK":
-      return detailed === "FOOD_AND_DRINK_GROCERIES" ? "Groceries" : "Dining";
-    case "RENT_AND_UTILITIES":
-      return detailed === "RENT_AND_UTILITIES_RENT" ? "Housing" : "Utilities";
-    case "HOME_IMPROVEMENT":
-      return "Housing";
-    case "TRANSPORTATION":
-    case "TRAVEL":
-      return "Transportation";
-    case "MEDICAL":
-    case "PERSONAL_CARE":
-      return "Health";
-    case "GENERAL_MERCHANDISE":
-      return "Shopping";
-    case "ENTERTAINMENT":
-      return "Entertainment";
-    case "LOAN_PAYMENTS":
-      return "Debt payments";
-    case "GENERAL_SERVICES":
-      return detailed === "GENERAL_SERVICES_INSURANCE" ? "Insurance" : "Other";
-    case "GOVERNMENT_AND_NON_PROFIT":
-      return detailed === "GOVERNMENT_AND_NON_PROFIT_DONATIONS" ? "Gifts" : "Other";
-    default:
-      return "Other";
-  }
-}
-
-/** The same money movement seen twice, for example on an imported statement and in the bank feed. */
-export function sameCharge(t: Transaction, date: string, amount: number, kind: Transaction["kind"]) {
-  const days = Math.abs(new Date(t.date).getTime() - new Date(date).getTime()) / 86_400_000;
-  return t.kind === kind && Math.abs(t.amount - amount) < 0.005 && days <= 3;
-}
-
-const signed = (t: Transaction) => (t.kind === "income" ? t.amount : -t.amount);
-
-/** Folds one sync result into the money data. Pending transactions wait until they post. */
-export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyData {
-  const accounts = [...d.accounts];
-  const idFor = new Map<string, string>(); // Plaid account id -> our account id
-  const liveLinks = new Set(d.bankLinks.map((l) => l.id));
-  const adopted = new Set<string>(); // our accounts that just took over this bank account
-  for (const pa of r.accounts) {
-    let acct = accounts.find((a) => a.plaid?.linkId === link.id && a.plaid.accountId === pa.id);
-    if (!acct && pa.mask) {
-      // The same bank account already here: typed in or filled from statements, or
-      // from a bank connection that was removed. The bank feed takes it over so
-      // nothing is counted twice; its owner stays as you set it.
-      const i = accounts.findIndex(
-        (a) => a.last4 === pa.mask && (a.type === "credit") === (accountType(pa) === "credit") && (!a.plaid || !liveLinks.has(a.plaid.linkId) || a.plaid.linkId === link.id),
-      );
-      if (i >= 0) {
-        acct = { ...accounts[i], plaid: { linkId: link.id, accountId: pa.id } };
-        accounts[i] = acct;
-        adopted.add(acct.id);
-      }
-    }
-    if (!acct) {
-      acct = {
-        id: newId(),
-        name: pa.name,
-        type: accountType(pa),
-        openingBalance: 0,
-        scope: link.scope,
-        last4: pa.mask ?? undefined,
-        plaid: { linkId: link.id, accountId: pa.id },
-      };
-      accounts.push(acct);
-    }
-    idFor.set(pa.id, acct.id);
-  }
-
-  const gone = new Set(r.removed);
-  const changed = new Map([...r.added, ...r.modified].map((t) => [t.id, t]));
-  const existing = d.transactions.filter((t) => !t.plaidId || (!gone.has(t.plaidId) && !changed.has(t.plaidId)));
-  const kept = new Map(d.transactions.filter((t) => t.plaidId && changed.has(t.plaidId)).map((t) => [t.plaidId!, t]));
-  const incoming: Transaction[] = [];
-  const scope = link.scope ?? "personal";
-  const claimed = new Set<string>(); // statement rows that turned out to be this same bank transaction
-  for (const pt of changed.values()) {
-    const accountId = idFor.get(pt.accountId);
-    if (!accountId || pt.pending) continue;
-    const acctScope = accounts.find((a) => a.id === accountId)?.scope ?? scope; // you may have moved the account since connecting
-    const income = pt.amount < 0; // Plaid: positive is money leaving the account
-    const prev =
-      kept.get(pt.id) ??
-      existing.find(
-        (t) =>
-          (!t.plaidId || adopted.has(t.accountId)) && !claimed.has(t.id) && t.accountId === accountId && t.plaidId !== pt.id && sameCharge(t, pt.date, Math.abs(pt.amount), income ? "income" : "expense"),
-      );
-    if (prev && prev.plaidId !== pt.id) claimed.add(prev.id);
-    incoming.push({
-      id: prev?.id ?? newId(),
-      date: pt.date,
-      description: pt.name,
-      amount: Math.abs(pt.amount),
-      kind: income ? "income" : "expense",
-      // Keep a category already set; otherwise a learned rule, then Plaid's guess.
-      category:
-        prev?.category ??
-        (isCompany(acctScope)
-          ? autoCategory(d.rules, pt.name, acctScope, income, pt.category)
-          : (ruleCategory(d.rules, pt.name, acctScope) ?? categoryFor(pt.category, income))),
-      categoryLocked: prev?.categoryLocked,
-      accountId,
-      transferId: prev?.transferId,
-      plaidId: pt.id,
-    });
-  }
-  const transactions = [...existing.filter((t) => !claimed.has(t.id)), ...incoming];
-
-  // Set each account's starting balance so its balance matches the bank's.
-  const balanced = accounts.map((a): Account => {
-    const pa = a.plaid?.linkId === link.id ? r.accounts.find((x) => x.id === a.plaid!.accountId) : undefined;
-    if (!pa || pa.current === null) return a;
-    const net = transactions.filter((t) => t.accountId === a.id).reduce((s, t) => s + signed(t), 0);
-    const openingBalance = isLiability(a) ? pa.current + net : pa.current - net;
-    const bankBalance = { current: pa.current, available: pa.available ?? null, asOf: new Date().toISOString() };
-    return { ...a, openingBalance: Math.round(openingBalance * 100) / 100, bankBalance };
-  });
-
-  return {
-    ...d,
-    accounts: balanced,
-    transactions,
-    bankLinks: d.bankLinks.map((l) =>
-      l.id === link.id
-        ? {
-            ...l,
-            cursor: r.cursor,
-            institution: l.institution || r.institution,
-            lastSync: new Date().toISOString(),
-            historyStatus: r.updateStatus || l.historyStatus,
-            error: undefined,
-            errorCode: undefined,
-          }
-        : l,
-    ),
-  };
-}
-
 /* ---------------- Syncing ---------------- */
 
 // One sync per bank at a time: a second request while one is running waits for it.
 const running = new Map<string, Promise<string | undefined>>();
 const syncListeners = new Set<() => void>();
-let lastRun: { at: string; ok: number; failed: number } | null = null;
-const notify = () => syncListeners.forEach((l) => l());
+type Activity = { syncing: number; lastRun: { at: string; ok: number; failed: number } | null; problem: { code: string; text: string } | null };
+let lastRun: Activity["lastRun"] = null;
+// A problem that stops every bank syncing (keys, database), in plain words.
+let problem: Activity["problem"] = null;
+let snapshot: Activity = { syncing: 0, lastRun, problem };
+const notify = () => {
+  snapshot = { syncing: running.size, lastRun, problem };
+  syncListeners.forEach((l) => l());
+};
 
-/** How many banks are syncing right now, and how the last sync went, for the screens. */
+/** How many banks are syncing right now, how the last sync went, and anything blocking all of them. */
 export function useSyncActivity() {
-  const count = useSyncExternalStore(
+  return useSyncExternalStore(
     (l) => {
       syncListeners.add(l);
       return () => syncListeners.delete(l);
     },
-    () => running.size,
-    () => 0,
+    () => snapshot,
+    () => snapshot,
   );
-  return { syncing: count, lastRun };
 }
 
 /** Errors that need you (sign in again, reconnect); syncing again on its own won't fix them. */
 export const needsYou = (l: BankLink) =>
   l.errorCode === "BAD_SEAL" || l.errorCode === "ITEM_LOGIN_REQUIRED" || l.errorCode === "PENDING_EXPIRATION" || l.errorCode === "PENDING_DISCONNECT";
 
+type RefreshLink = { id: string; ok: boolean; hasMore: boolean; historyStatus?: string; code?: string; error?: string };
+const PROBLEMS: Record<string, string> = {
+  NOT_CONFIGURED: "The server has no Plaid keys: PLAID_CLIENT_ID and PLAID_SECRET aren't set in Vercel, and no keys are saved for the site.",
+  BAD_KEYS: "The Plaid keys saved for this site can't be opened any more (the site password changed since they were saved).",
+  INVALID_API_KEYS: "Plaid refused the server's Plaid keys (INVALID_API_KEYS).",
+};
+
 /**
- * Brings a bank up to date. A big first sync comes in several calls; each one
- * is saved as it arrives. Always starts from the latest saved cursor, so a
- * sync started from an older copy of the data doesn't fetch twice. Returns
- * Plaid's history status, or undefined when the sync failed.
+ * Syncs banks on the server, which saves straight into the online money data
+ * where the reports read it, then reloads that data here. Big histories take
+ * several rounds. Returns each bank's history status, or undefined if it failed;
+ * "browser" when there's no online database and this browser must sync itself.
  */
-export function syncLink(link: BankLink, trigger: "first-sync" | "sync" = "sync"): Promise<string | undefined> {
-  const already = running.get(link.id);
-  if (already) return already;
-  const job = runSync(link, trigger).finally(() => {
-    running.delete(link.id);
-    notify();
-  });
-  running.set(link.id, job);
-  notify();
-  return job;
+async function refreshOnServer(ids: string[], trigger: "first-sync" | "sync"): Promise<Map<string, string | undefined> | "browser"> {
+  const out = new Map<string, string | undefined>();
+  let todo = ids;
+  try {
+    await flushCloud(); // the server works from the saved copy
+    for (let round = 0; round < 10 && todo.length; round++) {
+      const r = await api<{ links: RefreshLink[] }>("refresh", { only: todo });
+      for (const l of r.links) out.set(l.id, l.ok ? l.historyStatus || "OK" : undefined);
+      todo = r.links.filter((l) => l.ok && l.hasMore).map((l) => l.id);
+      await reloadFromCloud(); // show what's arrived so far
+    }
+    problem = null;
+  } catch (e) {
+    const err = e as Error & { code?: string };
+    if (err.code === "NO_DATABASE") return "browser";
+    problem = { code: err.code || "UNREACHABLE", text: PROBLEMS[err.code ?? ""] ?? `Bank sync couldn't run: ${err.message}` };
+    for (const id of ids) if (!out.has(id)) out.set(id, undefined);
+  }
+  // A finished sync refreshes the saved Financial Briefing.
+  setMoneyData((d) => saveBriefing(d, trigger));
+  return out;
 }
 
+/** Syncs these banks: on the server when the online database is in use, otherwise in this browser. */
+function startSync(links: BankLink[], trigger: "first-sync" | "sync") {
+  const fresh = links.filter((l) => !running.has(l.id));
+  if (fresh.length) {
+    const job = cloudReady() ? refreshOnServer(fresh.map((l) => l.id), trigger) : Promise.resolve("browser" as const);
+    for (const l of fresh) {
+      const one = job
+        .then((r) => (r === "browser" ? runSync(l, trigger) : r.get(l.id)))
+        .finally(() => {
+          running.delete(l.id);
+          notify();
+        });
+      running.set(l.id, one);
+    }
+    // When this round is done, the sync check looks again.
+    void Promise.all(fresh.map((l) => running.get(l.id)!)).then((rs) => {
+      const ok = rs.filter((r) => r !== undefined).length;
+      lastRun = { at: new Date().toISOString(), ok, failed: rs.length - ok };
+      notify();
+    });
+    notify();
+  }
+  return links.map((l) => running.get(l.id)!);
+}
+
+/**
+ * Brings a bank up to date. Returns Plaid's history status, or undefined when
+ * the sync failed (the bank's line then says why).
+ */
+export function syncLink(link: BankLink, trigger: "first-sync" | "sync" = "sync"): Promise<string | undefined> {
+  return startSync([link], trigger)[0];
+}
+
+/** The same sync, run in this browser: used when there's no online database. */
 async function runSync(link: BankLink, trigger: "first-sync" | "sync"): Promise<string | undefined> {
   const fresh = () => getMoneyData()?.bankLinks.find((l) => l.id === link.id) ?? link;
   let cursor = fresh().cursor;
@@ -321,16 +214,18 @@ async function runSync(link: BankLink, trigger: "first-sync" | "sync"): Promise<
         return current ? applySync(d, current, r) : d;
       });
       if (!r.hasMore) {
-        // A finished sync refreshes the saved Financial Briefing.
         setMoneyData((d) => saveBriefing(d, trigger));
         return r.updateStatus || "OK";
       }
     }
-    // Still more after 12 calls (a very large history): what arrived is saved; the next sync continues.
     setMoneyData((d) => saveBriefing(d, trigger));
     return "MORE";
   } catch (e) {
     const err = e as Error & { code?: string };
+    if (PROBLEMS[err.code ?? ""]) {
+      problem = { code: err.code!, text: PROBLEMS[err.code!] };
+      notify();
+    }
     // The saved briefing records the failure too, so it never reads as current.
     setMoneyData((d) => saveBriefing({ ...d, bankLinks: d.bankLinks.map((l) => (l.id === link.id ? { ...l, error: err.message, errorCode: err.code } : l)) }, trigger));
   }
@@ -340,11 +235,9 @@ async function runSync(link: BankLink, trigger: "first-sync" | "sync"): Promise<
 /** Syncs every connected bank that can sync without you. Resolves when all are done. */
 export async function syncAll(trigger: "first-sync" | "sync" = "sync") {
   const links = (getMoneyData()?.bankLinks ?? []).filter((l) => !needsYou(l));
-  const results = await Promise.all(links.map((l) => syncLink(l, trigger)));
+  const results = await Promise.all(startSync(links, trigger));
   const ok = results.filter((r) => r !== undefined).length;
-  lastRun = { at: new Date().toISOString(), ok, failed: links.length - ok };
-  notify();
-  return lastRun;
+  return { at: new Date().toISOString(), ok, failed: links.length - ok };
 }
 
 /** Right after connecting, Plaid needs a little while to gather history. Check back a few times. */
@@ -394,7 +287,7 @@ export function useAutoSync(data: MoneyData | null) {
         return age(l) > (l.historyStatus === HISTORY_DONE ? STALE_MS : RETRY_MS);
       });
       due.forEach((l) => tried.current.add(l.id));
-      if (due.length) due.forEach((l) => void syncLink(l));
+      if (due.length) void startSync(due, "sync");
     };
     check();
     const onVisible = () => document.visibilityState === "visible" && check();
@@ -472,8 +365,10 @@ export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: 
       const { linkToken } = await api<{ linkToken: string }>("link-token", {});
       const publicToken = await openLink(linkToken);
       if (!publicToken) return;
-      const { itemId, link } = await api<{ itemId: string; link: string }>("exchange", { publicToken });
-      const bank: BankLink = { id: newId(), itemId, institution: "", link, cursor: "", scope, connectedAt: new Date().toISOString() };
+      const id = newId();
+      // The server saves the new connection into the online money data straight away.
+      const { itemId, link } = await api<{ itemId: string; link: string }>("exchange", { publicToken, id, scope });
+      const bank: BankLink = { id, itemId, institution: "", link, cursor: "", scope, connectedAt: new Date().toISOString() };
       setMoneyData((d) => ({ ...d, bankLinks: [...d.bankLinks, bank] }));
       setBusy(bank.id);
       const st = await firstSync(bank, (n) => setWaiting(`Plaid is gathering your history (check ${n} of 8)…`));
@@ -557,6 +452,7 @@ export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: 
   const check = server?.check;
   return (
     <Card title="Connected banks">
+      <SyncCheck />
       <div className="mb-3 flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1 text-xs text-zinc-500">
           New accounts belong to
@@ -793,5 +689,111 @@ function PlaidKeysForm({ onSaved, onCancel }: { onSaved: (r: KeysResult) => void
         )}
       </div>
     </form>
+  );
+}
+
+/* ---------------- Sync check ---------------- */
+
+type Health = {
+  build: string;
+  database: { ok: boolean; code?: string; text?: string; rev?: number; sizeKb?: number };
+  keys: { source: string; env: string | null; ok?: boolean; code?: string; problem?: string };
+  money: { accounts: number; bankAccounts: number; transactions: number; bankTransactions: number } | null;
+  links: {
+    id: string;
+    institution: string;
+    lastSync: string | null;
+    historyStatus: string | null;
+    savedError: string | null;
+    accounts: number;
+    bankTransactions: number;
+    first: string | null;
+    last: string | null;
+    tokenOk?: boolean;
+    bankError?: string | null;
+  }[];
+};
+
+type Line = { ok: boolean; text: string };
+
+function healthLines(h: Health): Line[] {
+  const out: Line[] = [];
+  out.push(h.database.ok ? { ok: true, text: "Online database: connected" } : { ok: false, text: h.database.text ?? "The online database isn't reachable." });
+  if (h.keys.problem) out.push({ ok: false, text: h.keys.problem });
+  else if (h.keys.ok) out.push({ ok: true, text: `Plaid keys: working (${h.keys.env === "production" ? "Production" : "Sandbox"}, ${h.keys.source === "vercel" ? "from Vercel settings" : h.keys.source === "site" ? "saved for the site" : "saved on this device"})` });
+  if (h.database.ok && h.links.length === 0) out.push({ ok: false, text: "The online money data has no bank connections saved in it." });
+  for (const l of h.links) {
+    const name = l.institution || "A bank";
+    if (l.tokenOk === false) out.push({ ok: false, text: `${name}: this connection was made with different Plaid keys than the server has now, so Plaid can't be asked for it. It has to be connected again.` });
+    else if (l.bankError === "ITEM_LOGIN_REQUIRED" || l.bankError === "PENDING_EXPIRATION")
+      out.push({ ok: false, text: `${name}: Plaid says the bank needs you to sign in again (${l.bankError}).` });
+    else if (l.bankError) out.push({ ok: false, text: `${name}: Plaid reports ${l.bankError}.` });
+    else if (!l.lastSync) out.push({ ok: false, text: `${name}: connected but not synced yet.${h.keys.problem ? " It syncs once the keys problem above is fixed." : " Refresh now syncs it."}` });
+    else
+      out.push({
+        ok: l.bankTransactions > 0,
+        text: `${name}: ${l.accounts} account${l.accounts === 1 ? "" : "s"}, ${l.bankTransactions.toLocaleString()} bank transactions${l.first ? ` (${l.first} to ${l.last})` : ""}, synced ${timeAgo(l.lastSync).replace(/^Synced /, "")}${l.historyStatus === "NOT_READY" ? ", Plaid is still preparing the history" : ""}`,
+      });
+  }
+  return out;
+}
+
+/** The server's own check of everything the bank sync needs, with Refresh now. */
+export function SyncCheck({ compact = false }: { compact?: boolean }) {
+  const [h, setH] = useState<Health | null>(null);
+  const [failed, setFailed] = useState("");
+  const [busy, setBusy] = useState(false);
+  const activity = useSyncActivity();
+  const check = useRef(async () => {
+    try {
+      setH(await api<Health>("health", {}));
+      setFailed("");
+    } catch (e) {
+      setFailed((e as Error).message);
+    }
+  });
+  useEffect(() => {
+    void check.current();
+  }, []);
+  // Check again after each sync finishes.
+  const last = activity.lastRun?.at;
+  useEffect(() => {
+    if (last) void check.current();
+  }, [last]);
+
+  const lines = h ? healthLines(h) : [];
+  const bad = lines.filter((l) => !l.ok);
+  // The sync's own problem, unless the check already says the same thing about the keys.
+  const extra = activity.problem && !(h?.keys.problem && /KEYS|CONFIGURED/.test(activity.problem.code)) ? [{ ok: false, text: activity.problem.text }] : [];
+  bad.unshift(...extra);
+  if (compact && h && !bad.length && !failed) return null;
+
+  async function refresh() {
+    setBusy(true);
+    await syncAll();
+    await check.current();
+    setBusy(false);
+  }
+
+  return (
+    <div className={`mb-3 rounded-lg border px-3 py-2 text-xs ${bad.length || failed ? "border-rose-500/40 bg-rose-500/5" : "border-zinc-200 dark:border-zinc-800"}`} data-testid="sync-check">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="min-w-0 flex-1 font-medium">
+          {!h && !failed ? "Checking the bank sync…" : bad.length || failed ? "Bank sync needs attention" : "Bank sync check: everything is working"}
+        </p>
+        <button className={ghostButtonClass} onClick={refresh} disabled={busy || activity.syncing > 0}>
+          {busy || activity.syncing > 0 ? "Refreshing…" : "Refresh now"}
+        </button>
+      </div>
+      {failed && <p className="mt-1 text-rose-600 dark:text-rose-400">The check itself couldn&apos;t run: {failed}</p>}
+      <ul className="mt-1 flex flex-col gap-0.5">
+        {(compact ? bad : [...extra, ...lines]).map((l, i) => (
+          <li key={i} className={l.ok ? "text-zinc-500" : "text-rose-600 dark:text-rose-400"}>
+            {l.ok ? "✓ " : "✗ "}
+            {l.text}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

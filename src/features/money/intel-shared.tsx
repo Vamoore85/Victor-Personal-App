@@ -5,7 +5,7 @@ import { createLocalStore } from "@/lib/local-store";
 import { applyScan, BUCKETS, detectRecurring, type Bucket, type Coverage } from "./bill-intel";
 import { buildSample } from "./bill-sample";
 import { addDays, today } from "./calc";
-import { newId, setMoneyData } from "./store";
+import { getMoneyData, newId, setMoneyData } from "./store";
 import { DEFAULT_SPEND_OPTIONS, type RangeId, type SpendOptions } from "./spend";
 import type { MoneyData, RecurringFinding } from "./types";
 
@@ -25,13 +25,15 @@ type SampleState = { generatedOn: string; edited: boolean; data: MoneyData | nul
 // v2: two years of made-up history (v1 had 120 days).
 const sampleStore = createLocalStore<SampleState>("maverick.bills-sample.v2", { generatedOn: "", edited: false, data: null });
 // v2: the first version treated old hand-made bill rows as real data.
-const modeStore = createLocalStore<{ mode: Mode | null }>("maverick.bills-mode.v2", { mode: null });
+const modeStore = createLocalStore<{ mode: Mode | null; withBank?: boolean }>("maverick.bills-mode.v2", { mode: null });
 
 export function resetSample() {
   sampleStore.set(() => ({ generatedOn: today(), edited: false, data: buildSample() }));
 }
 const updateSample: Update = (fn) => sampleStore.set((s) => ({ generatedOn: s.generatedOn || today(), edited: true, data: fn(s.data ?? buildSample()) }));
-export const setMode = (mode: Mode) => modeStore.set(() => ({ mode }));
+const hasBankData = (d: MoneyData | null) => !!d?.transactions.some((t) => t.plaidId);
+// Remembers whether bank data was already here when you picked, so a Sample chosen before your banks synced doesn't hide them.
+export const setMode = (mode: Mode) => modeStore.set(() => ({ mode, withBank: hasBankData(getMoneyData()) }));
 
 /**
  * Whether your real data is enough for these reports: bank or imported
@@ -42,7 +44,9 @@ export function realReadiness(d: MoneyData, t = today()) {
   const from = addDays(t, -365);
   const history = d.transactions.filter((x) => !x.transferId && x.date >= from && x.date <= t).length;
   const confirmed = d.recurring.filter((f) => f.status === "confirmed").length + d.bills.filter((b) => b.recurringId).length;
-  return { history, confirmed, ready: history >= 10 || confirmed > 0 };
+  // Any bank-feed transaction means your real data is here, however little has arrived yet.
+  const bank = d.transactions.some((x) => x.plaidId);
+  return { history, confirmed, ready: history >= 10 || confirmed > 0 || bank };
 }
 
 let autoScannedOn = "";
@@ -51,7 +55,8 @@ export function useWorkspace(data: MoneyData) {
   const sample = sampleStore.use();
   const saved = modeStore.use();
   const readiness = realReadiness(data);
-  const mode: Mode = saved?.mode ?? (readiness.ready ? "real" : "sample");
+  const pickedBeforeBank = saved?.mode === "sample" && !saved.withBank && hasBankData(data);
+  const mode: Mode = (pickedBeforeBank ? null : saved?.mode) ?? (readiness.ready ? "real" : "sample");
 
   // Build the sample the first time it's shown, and refresh it each day until you edit it.
   useEffect(() => {

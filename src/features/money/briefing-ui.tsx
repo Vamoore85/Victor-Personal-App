@@ -8,7 +8,7 @@ import { buildBriefing, briefingPlainText, saveBriefing, FRESHNESS_LABEL, type B
 import { Card, Empty, ghostButtonClass } from "./ui";
 import { RealEmpty, SampleBanner, Tag, ago, useWorkspace } from "./intel-shared";
 import type { MoneyData } from "./types";
-import { syncAll, useSyncActivity } from "./plaid";
+import { SyncCheck, syncAll, useSyncActivity } from "./plaid";
 import { setMoneyData } from "./store";
 
 /*
@@ -57,6 +57,7 @@ export function BriefingView({ data, goTo }: { data: MoneyData; goTo: (tab: stri
     <div className="flex flex-col gap-3 lg:gap-4" data-testid="briefing">
       {mode === "sample" ? <SampleBanner /> : !readiness.ready && <RealEmpty bills={data.bills.length} goTo={goTo} />}
 
+      <SyncCheck compact />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-zinc-200 bg-surface p-3 dark:border-zinc-800">
         <div className="min-w-0 flex-1">
           <p className="flex flex-wrap items-center gap-2">
