@@ -202,7 +202,7 @@ function Next30({ lines, onOpen }: { lines: UpcomingLine[]; onOpen: (id: string)
   const sorted = [...lines].sort((a, b) => a.date.localeCompare(b.date) || b.amount - a.amount);
   const sum = sorted.reduce((s, l) => s + l.amount, 0);
   return (
-    <section className="rounded-2xl border border-zinc-200 bg-surface dark:border-zinc-800" data-testid="next-30">
+    <section className="overflow-hidden rounded-2xl border border-zinc-200 bg-surface dark:border-zinc-800" data-testid="next-30">
       <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-zinc-100 px-4 py-3 sm:px-5 dark:border-zinc-800">
         <h3 className="text-2xl font-bold tracking-tight">Next 30 days</h3>
         <p className="text-base text-zinc-500">
@@ -212,34 +212,54 @@ function Next30({ lines, onOpen }: { lines: UpcomingLine[]; onOpen: (id: string)
       {sorted.length === 0 ? (
         <p className="px-4 py-4 text-base text-zinc-500 sm:px-5">No bills expected in the next 30 days.</p>
       ) : (
-        <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
-          {sorted.map((l) => {
-            const d = new Date(`${l.date}T12:00:00`);
-            return (
-              <li key={l.key}>
-                <button
-                  className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-zinc-50 sm:gap-4 sm:px-5 dark:hover:bg-zinc-900"
-                  onClick={() => l.findingId && onOpen(l.findingId)}
-                  disabled={!l.findingId}
-                >
-                  <span className="w-14 shrink-0">
-                    <span className="block text-base font-semibold">{d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-                    <span className="block text-xs text-zinc-500">{d.toLocaleDateString("en-US", { weekday: "short" })}</span>
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-base font-medium">{l.name}</span>
-                    <span className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-                      <span className={`rounded-full px-2 py-0.5 font-medium ${ENTITY_TONE[l.entity] ?? ENTITY_TONE.gladiator}`}>{entityLabel(l.entity)}</span>
-                      {l.account && <span className="truncate">{l.account}</span>}
-                      {l.predicted && <span>expected</span>}
-                    </span>
-                  </span>
-                  <span className="shrink-0 text-lg font-semibold tabular-nums">{money(l.amount)}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-left" data-testid="next-30-table">
+            <thead>
+              <tr className="bg-zinc-100 text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
+                <th className="border-b border-zinc-200 px-3 py-2 sm:px-5 dark:border-zinc-800">Date</th>
+                <th className="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">Bill</th>
+                <th className="hidden border-b border-zinc-200 px-3 py-2 sm:table-cell dark:border-zinc-800">Company</th>
+                <th className="hidden border-b border-zinc-200 px-3 py-2 md:table-cell dark:border-zinc-800">Paid from</th>
+                <th className="border-b border-zinc-200 px-3 py-2 text-right sm:px-5 dark:border-zinc-800">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((l, i) => {
+                const d = new Date(`${l.date}T12:00:00`);
+                return (
+                  <tr
+                    key={l.key}
+                    className={`${i % 2 ? "bg-zinc-50 dark:bg-zinc-900/40" : ""} ${l.findingId ? "cursor-pointer hover:bg-amber-50 dark:hover:bg-zinc-800" : ""}`}
+                    onClick={() => l.findingId && onOpen(l.findingId)}
+                  >
+                    <td className="whitespace-nowrap border-b border-zinc-100 px-3 py-2.5 sm:px-5 dark:border-zinc-800">
+                      <span className="text-base font-semibold">{d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>{" "}
+                      <span className="block text-xs text-zinc-500 sm:inline">{d.toLocaleDateString("en-US", { weekday: "short" })}</span>
+                    </td>
+                    <td className="border-b border-zinc-100 px-3 py-2.5 text-base font-medium dark:border-zinc-800">
+                      {l.name}
+                      {l.predicted && <span className="ml-2 text-xs font-normal text-zinc-500">expected</span>}
+                      <span className={`mt-1 block w-fit rounded-full px-2 py-0.5 text-xs font-medium sm:hidden ${ENTITY_TONE[l.entity] ?? ENTITY_TONE.gladiator}`}>{entityLabel(l.entity)}</span>
+                    </td>
+                    <td className="hidden border-b border-zinc-100 px-3 py-2.5 sm:table-cell dark:border-zinc-800">
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${ENTITY_TONE[l.entity] ?? ENTITY_TONE.gladiator}`}>{entityLabel(l.entity)}</span>
+                    </td>
+                    <td className="hidden border-b border-zinc-100 px-3 py-2.5 text-sm text-zinc-500 md:table-cell dark:border-zinc-800">{l.account}</td>
+                    <td className="whitespace-nowrap border-b border-zinc-100 px-3 py-2.5 text-right text-lg font-semibold tabular-nums sm:px-5 dark:border-zinc-800">{money(l.amount)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="bg-zinc-100 font-semibold dark:bg-zinc-900">
+                <td className="px-3 py-2.5 sm:px-5" colSpan={2}>Total, next 30 days</td>
+                <td className="hidden sm:table-cell" />
+                <td className="hidden md:table-cell" />
+                <td className="px-3 py-2.5 text-right text-lg tabular-nums sm:px-5">{money(sum)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
       )}
     </section>
   );
