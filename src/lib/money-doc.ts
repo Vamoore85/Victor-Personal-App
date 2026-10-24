@@ -36,7 +36,7 @@ export function accountDiag(data: unknown) {
       const bal = !bb ? "none" : bb.current === null && bb.available === null ? "empty" : `${Math.round((Date.now() - new Date(bb.asOf).getTime()) / 36e5)}h`;
       const bank = d.transactions.filter((t) => t.accountId === a.id && t.plaidId).length;
       const other = d.transactions.filter((t) => t.accountId === a.id && !t.plaidId).length;
-      return `${a.last4 ?? "----"}/${a.scope ?? "personal"}/${a.type}/feed=${!a.plaid ? "none" : link ? "live" : "removed"}/bal=${bal}/tx=${bank}+${other}`;
+      return `${a.last4 ?? "----"}/${a.needsEntity ? "UNASSIGNED" : (a.scope ?? "personal")}${a.nickname ? `(${a.nickname})` : ""}/${a.type}/feed=${!a.plaid ? "none" : link ? "live" : "removed"}/bal=${bal}/tx=${bank}+${other}`;
     })
-    .join(" ");
+    .join(" ") + ` rules=${d.accountRules ?? 0} links=${d.bankLinks.length} dupLinks=${d.bankLinks.filter((l) => l.duplicateOf).length}`;
 }
