@@ -101,7 +101,7 @@ const DEFAULT_PREFS: IntelPrefs = {
   spend: { view: "summary", range: "ytd", custom: { start: "", end: "" }, opts: DEFAULT_SPEND_OPTIONS },
 };
 export const DEFAULT_BILL_FILTERS = DEFAULT_PREFS.bills;
-const prefsStore = createLocalStore<IntelPrefs>("maverick.intel-prefs.v1", DEFAULT_PREFS, (raw) => {
+const prefsStore = createLocalStore<IntelPrefs>("maverick.intel-prefs.v2", DEFAULT_PREFS, (raw) => {
   const r = (raw ?? {}) as Partial<IntelPrefs>;
   return {
     entity: r.entity ?? null,
@@ -183,7 +183,7 @@ export function Sheet({ title, onClose, children }: { title: string; onClose: ()
 
 const selectClass = "min-w-0 rounded-lg border border-zinc-300 bg-surface px-2.5 py-1.5 text-sm dark:border-zinc-700";
 
-export const ENTITY_OPTIONS: { id: OwnerView; label: string }[] = [...BUCKETS.map((b) => ({ id: b.id as OwnerView, label: b.label })), { id: "all", label: "All entities (side by side)" }];
+export const ENTITY_OPTIONS: { id: OwnerView; label: string }[] = [{ id: "all", label: "All entities" }, ...BUCKETS.map((b) => ({ id: b.id as OwnerView, label: b.label }))];
 
 export type Chip = { label: string; clear: () => void };
 

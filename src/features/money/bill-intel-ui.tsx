@@ -200,7 +200,7 @@ export function Bills({ data, categories, goTo, initialEntity }: { data: MoneyDa
       )}
       {f.view === "accounts" && <Accounts d={ws} buckets={buckets} update={update} sample={mode === "sample"} goTo={goTo} />}
 
-      {open && <Detail d={ws} target={open} update={update} categories={categories} onClose={() => setOpen(null)} />}
+      {open && <BillDetail d={ws} target={open} update={update} categories={categories} onClose={() => setOpen(null)} />}
     </div>
   );
 }
@@ -598,7 +598,7 @@ function FindingActions({ f, update, onOpen }: { f: RecurringFinding; update: Up
 
 /* ---------------- Detail ---------------- */
 
-function Detail({
+export function BillDetail({
   d,
   target,
   update,

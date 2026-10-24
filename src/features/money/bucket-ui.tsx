@@ -5,8 +5,9 @@ import type { Scope } from "./types";
 import { Field, inputClass } from "./ui";
 
 /** The two owners of bills, never mixed: Personal / Maverick and Gladiator. */
-export function BucketChip({ bucket, scope }: { bucket?: Bucket; scope?: Scope }) {
+export function BucketChip({ bucket, scope }: { bucket?: Bucket | "all"; scope?: Scope }) {
   const b = bucket ?? bucketOf(scope);
+  if (b === "all") return <span className="inline-flex shrink-0 items-center rounded bg-zinc-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-zinc-600 dark:text-zinc-300">All entities</span>;
   return (
     <span
       className={`inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${

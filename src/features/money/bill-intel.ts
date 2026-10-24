@@ -28,7 +28,7 @@ export const BUCKETS: { id: Bucket; label: string; short: string }[] = [
   { id: "pm", label: "Personal / Maverick", short: "Personal / Maverick" },
   { id: "gladiator", label: "Gladiator", short: "Gladiator" },
 ];
-export const bucketLabel = (b: Bucket) => BUCKETS.find((x) => x.id === b)!.label;
+export const bucketLabel = (b: Bucket | "all") => BUCKETS.find((x) => x.id === b)?.label ?? "All entities";
 export const bucketOf = (scope: Scope | undefined): Bucket => (scope === "gladiator" ? "gladiator" : "pm");
 /** Moving something into a bucket: Gladiator, or back to Personal / Maverick keeping Maverick if it was Maverick. */
 export const scopeForBucket = (b: Bucket, current: Scope | undefined): Scope =>

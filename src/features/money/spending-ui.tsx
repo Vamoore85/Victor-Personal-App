@@ -50,15 +50,15 @@ export function Spending({ data, goTo, initialEntity }: { data: MoneyData; goTo?
   const prefs = usePrefs();
   const p = prefs.spend;
   const o = p.opts;
-  const owner: OwnerView = prefs.entity ?? initialEntity ?? "pm";
+  const owner: OwnerView = prefs.entity ?? initialEntity ?? "all";
   const [drill, setDrill] = useState<Drill | null>(null);
   const setSpend = (patch: Partial<typeof p>) => setPrefs((x) => ({ ...x, spend: { ...x.spend, ...patch } }));
   const setOpt = (patch: Partial<SpendOptions>) => setPrefs((x) => ({ ...x, spend: { ...x.spend, opts: { ...x.spend.opts, ...patch } } }));
 
   if (!ws) return <Empty>Loading the sample workspace…</Empty>;
 
-  const buckets: Bucket[] = owner === "all" ? ["pm", "gladiator"] : [owner];
-  const reports = buckets.map((b) => spendReport(ws, b, p.range, o, undefined, p.custom));
+  // All entities is one combined report; each row still says whose it is.
+  const reports = [spendReport(ws, owner, p.range, o, undefined, p.custom)];
   const accounts = ws.accounts.filter((a) => owner === "all" || (owner === "gladiator" ? a.scope === "gladiator" : a.scope !== "gladiator"));
   const accountName = (id: string) => ws.accounts.find((a) => a.id === id)?.name ?? "Removed account";
   const categories = [...new Set(reports.flatMap((r) => r.byCategory.map((g) => g.name)))].sort();

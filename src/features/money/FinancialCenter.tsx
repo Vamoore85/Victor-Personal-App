@@ -6,7 +6,9 @@ import { cloudErrorMessage, importMoneyData, retryCloud, useCloudState, useMoney
 import { exportEncryptedVault, importEncryptedVault } from "./vault";
 import { DEFAULT_CATEGORIES } from "./types";
 import { categoriesInUse, today } from "./calc";
-import { Accounts, Budgets, Overview, Transactions } from "./sections";
+import { Accounts, Budgets, Transactions } from "./sections";
+import { Overview } from "./outlook-ui";
+import { RecurringBills } from "./recurring-ui";
 import { Bills } from "./bill-intel-ui";
 import { Spending } from "./spending-ui";
 import { Documents } from "./documents-ui";
@@ -24,23 +26,26 @@ import { Taxes } from "./taxes";
 import { clearQuickBooksNotice, quickBooksNotice as readQuickBooksNotice } from "./quickbooks";
 import { COMPANIES, isCompany, type Company } from "./types";
 
-const TABS = [
-  { id: "briefing", label: "Briefing" },
+// Four views on top, all three entities together. Everything else is under Details.
+const MAIN = [
   { id: "overview", label: "Overview" },
-  { id: "accounts", label: "Accounts" },
-  { id: "transactions", label: "Transactions" },
-  { id: "bills", label: "Bills" },
   { id: "spending", label: "Spending" },
-  { id: "budgets", label: "Budgets" },
-  { id: "books", label: "Company books" },
-  { id: "receipts", label: "Receipts" },
-  { id: "documents", label: "Documents" },
-  { id: "taxes", label: "Taxes" },
-  { id: "institutions", label: "Maverick Vault" },
+  { id: "bills", label: "Bills" },
+  { id: "accounts", label: "Accounts" },
 ];
 
-const OWN_ENTITY = new Set(["bills", "spending", "briefing"]);
-const entityFor = (v: ScopeView) => (v === "gladiator" ? ("gladiator" as const) : v === "all" ? undefined : ("pm" as const));
+const DETAILS: { id: string; label: string; scoped?: boolean }[] = [
+  { id: "transactions", label: "Edit transactions", scoped: true },
+  { id: "calendar", label: "Bill calendar" },
+  { id: "briefing", label: "Briefing" },
+  { id: "command", label: "Command center" },
+  { id: "books", label: "Company books" },
+  { id: "budgets", label: "Budgets", scoped: true },
+  { id: "receipts", label: "Receipts", scoped: true },
+  { id: "documents", label: "Documents" },
+  { id: "taxes", label: "Taxes", scoped: true },
+  { id: "institutions", label: "Maverick Vault", scoped: true },
+];
 
 export function FinancialCenter() {
   const data = useMoneyData();
@@ -65,8 +70,7 @@ export function FinancialCenter() {
   if (!data) {
     return <p className="text-sm text-zinc-500">Loading…</p>;
   }
-  // Once a bank is connected, Money opens on the finished briefing.
-  const tab = chosenTab ?? (data.bankLinks.length > 0 || data.briefings.length > 0 ? "briefing" : "overview");
+  const tab = chosenTab ?? "overview";
 
   const personalCategories = categoriesInUse(filterByScope(data, "personal"), DEFAULT_CATEGORIES);
   const categories =
@@ -75,7 +79,6 @@ export function FinancialCenter() {
       : view === "personal"
         ? personalCategories
         : [...new Set([...personalCategories, ...BUSINESS_CATEGORY_NAMES])];
-  const shown = filterByScope(data, view);
 
   function chooseView(v: ScopeView) {
     setView(v);
@@ -111,14 +114,73 @@ export function FinancialCenter() {
     }
   }
 
+  const detailTab = DETAILS.find((t) => t.id === tab);
+  // Main views are always all three entities together; the Show switch only appears in a few detail views.
+  const scoped = detailTab?.scoped ? view : "all";
+  const shownHere = filterByScope(data, scoped);
+
   return (
-    <ScopeContext.Provider value={view}>
-    <div className="flex flex-col gap-4 lg:gap-5">
+    <ScopeContext.Provider value={scoped}>
+    <div className="flex flex-col gap-5 lg:gap-6">
       <VaultAutoLock />
-      <div className="flex flex-wrap items-center gap-3">
-        {/* Bills and Spending have their own owner choice, so this switch steps aside there. */}
-        {!OWN_ENTITY.has(tab) && <>
-        <div role="radiogroup" aria-label="Show" className="inline-flex max-w-full overflow-x-auto rounded-full border border-zinc-300 bg-surface p-0.5 [scrollbar-width:none] dark:border-zinc-700">
+      <nav className="flex items-center justify-between gap-2" aria-label="Money">
+        <div className="flex min-w-0 gap-0.5 overflow-x-auto rounded-full bg-zinc-200/60 p-1 [scrollbar-width:none] sm:gap-1 dark:bg-zinc-900">
+          {MAIN.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              aria-current={tab === t.id ? "page" : undefined}
+              className={`shrink-0 rounded-full px-2.5 py-1.5 text-[13px] sm:px-4 sm:text-sm ${
+                tab === t.id
+                  ? "bg-white font-medium text-brand shadow-sm dark:bg-zinc-800"
+                  : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <details className="relative shrink-0" data-testid="details-menu">
+          <summary aria-label="Details" className={`${ghostButtonClass} list-none whitespace-nowrap ${detailTab ? "text-brand" : ""}`}>
+            <span className="hidden sm:inline">{detailTab ? detailTab.label : "Details"} ▾</span>
+            <span className="sm:hidden" aria-hidden>
+              •••
+            </span>
+          </summary>
+          <div className="absolute right-0 z-20 mt-1 flex w-56 flex-col gap-0.5 rounded-xl border border-zinc-200 bg-surface p-1 shadow-lg dark:border-zinc-800">
+            {DETAILS.map((t) => (
+              <button
+                key={t.id}
+                className={`rounded-lg px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 ${tab === t.id ? "font-medium text-brand" : ""}`}
+                onClick={(e) => {
+                  setTab(t.id);
+                  (e.currentTarget.closest("details") as HTMLDetailsElement).open = false;
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+            <div className="my-1 border-t border-zinc-200 dark:border-zinc-800" />
+            <button className="rounded-lg px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800" onClick={exportData}>Export backup</button>
+            <button className="rounded-lg px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800" onClick={() => fileRef.current?.click()}>Import backup</button>
+          </div>
+        </details>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) importFile(f);
+            e.target.value = "";
+          }}
+        />
+      </nav>
+      <CloudBadge state={cloud} />
+
+      {detailTab?.scoped && (
+        <div role="radiogroup" aria-label="Show" className="inline-flex max-w-full self-start overflow-x-auto rounded-full border border-zinc-300 bg-surface p-0.5 [scrollbar-width:none] dark:border-zinc-700">
           {([
             ["all", "All"],
             ["personal", "Personal"],
@@ -129,7 +191,7 @@ export function FinancialCenter() {
               role="radio"
               aria-checked={view === v}
               onClick={() => chooseView(v)}
-              className={`shrink-0 rounded-full px-2.5 py-1.5 text-sm sm:px-4 ${
+              className={`shrink-0 rounded-full px-2.5 py-1 text-xs sm:px-3 ${
                 view === v ? "bg-brand font-medium text-on-brand" : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
               }`}
             >
@@ -137,98 +199,43 @@ export function FinancialCenter() {
             </button>
           ))}
         </div>
-        <span className="hidden text-xs text-zinc-500 sm:inline">
-          {view === "all"
-            ? "Showing everything together"
-            : `Showing ${COMPANIES.find((c) => c.value === view)?.legalName ?? "personal"} only`}
-        </span>
-        </>}
-        <CloudBadge state={cloud} />
-      </div>
-      <nav className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 gap-1 overflow-x-auto rounded-lg bg-zinc-200/60 p-1 [scrollbar-width:none] dark:bg-zinc-900">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`shrink-0 rounded-md px-3 py-1.5 text-sm ${
-                tab === t.id
-                  ? "bg-white font-medium text-brand shadow-sm dark:bg-zinc-800"
-                  : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-              }`}
-            >
-              {t.id === "overview" && view === "all" ? "Command center" : t.label}
-            </button>
-          ))}
-        </div>
-        {/* Backups: buttons on wider screens, tucked into a small menu on phones. */}
-        <details className="relative shrink-0 sm:hidden">
-          <summary className={`${ghostButtonClass} list-none whitespace-nowrap`}>Backup ▾</summary>
-          <div className="absolute right-0 z-20 mt-1 flex w-44 flex-col gap-1 rounded-lg border border-zinc-200 bg-surface p-1 shadow-lg dark:border-zinc-800">
-            <button className="rounded-md px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800" onClick={exportData}>Export backup</button>
-            <button className="rounded-md px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800" onClick={() => fileRef.current?.click()}>Import backup</button>
-          </div>
-        </details>
-        <div className="hidden gap-2 sm:flex">
-          <button className={ghostButtonClass} onClick={exportData}>Export backup</button>
-          <button className={ghostButtonClass} onClick={() => fileRef.current?.click()}>Import</button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/json"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) importFile(f);
-              e.target.value = "";
-            }}
-          />
-        </div>
-      </nav>
+      )}
 
-      {tab === "overview" &&
-        (view === "all" ? (
-          <CommandCenter
-            data={data}
-            goTo={setTab}
-            openBooks={(c) => {
-              setBooksCompany(c);
-              setTab("books");
-            }}
-          />
-        ) : (
-          <Overview data={shown} goTo={setTab} />
-        ))}
-      {tab === "briefing" && <BriefingView data={data} goTo={setTab} />}
+      {tab === "overview" && <Overview data={data} onSettings={() => setTab("accounts")} />}
+      {tab === "spending" && <Spending data={data} goTo={setTab} initialEntity="all" />}
+      {tab === "bills" && <RecurringBills data={data} categories={categories} />}
       {tab === "accounts" && (
         <>
-          {/* Every bank is listed here whatever the switch says, so each one can always be synced. */}
           <BankLinks
             data={data}
             onBriefing={() => {
               setMode("real");
-              setTab("briefing");
+              setTab("overview");
             }}
           />
-          <Accounts data={shown} />
+          <Accounts data={data} />
         </>
       )}
-      {tab === "transactions" && <Transactions data={shown} categories={categories} />}
-      {tab === "bills" && <Bills data={data} categories={categories} goTo={setTab} initialEntity={entityFor(view)} />}
-      {tab === "spending" && <Spending data={data} goTo={setTab} initialEntity={entityFor(view)} />}
-      {tab === "budgets" && <Budgets data={shown} categories={categories} />}
-      {tab === "institutions" && <Institutions data={shown} />}
-      {tab === "receipts" && <Receipts data={shown} />}
+      {tab === "briefing" && <BriefingView data={data} goTo={setTab} />}
+      {tab === "transactions" && <Transactions data={shownHere} categories={categories} />}
+      {tab === "calendar" && <Bills data={data} categories={categories} goTo={setTab} />}
+      {tab === "budgets" && <Budgets data={shownHere} categories={categories} />}
+      {tab === "institutions" && <Institutions data={shownHere} />}
+      {tab === "receipts" && <Receipts data={shownHere} />}
       {tab === "documents" && <Documents data={data} goTo={setTab} />}
-      {tab === "taxes" && <Taxes data={shown} />}
-      {tab === "books" && (
-        <Books
-          key={booksCompany ?? view}
+      {tab === "taxes" && <Taxes data={shownHere} />}
+      {tab === "command" && (
+        <CommandCenter
           data={data}
           goTo={setTab}
-          initialCompany={booksCompany ?? (view === "gladiator" ? "gladiator" : "business")}
-          quickBooksNotice={quickBooksNotice}
+          openBooks={(c) => {
+            setBooksCompany(c);
+            setTab("books");
+          }}
         />
+      )}
+      {tab === "books" && (
+        <Books key={booksCompany ?? "books"} data={data} goTo={setTab} initialCompany={booksCompany ?? "business"} quickBooksNotice={quickBooksNotice} />
       )}
     </div>
     </ScopeContext.Provider>
@@ -236,16 +243,15 @@ export function FinancialCenter() {
 }
 
 function CloudBadge({ state }: { state: ReturnType<typeof useCloudState> }) {
-  if (state === "off") return <span className="ml-auto text-xs text-zinc-400">Saved on this device only</span>;
+  if (state === "off") return <span className="text-xs text-zinc-400">Saved on this device only</span>;
   if (state === "error")
     return (
-      <span className="ml-auto max-w-md text-right text-xs text-rose-600 dark:text-rose-400">
+      <span className="max-w-md text-xs text-rose-600 dark:text-rose-400">
         <button className="underline" onClick={retryCloud}>
           Couldn&apos;t save online. Try again
         </button>
         {cloudErrorMessage() && <span className="mt-1 block">{cloudErrorMessage()}</span>}
       </span>
     );
-  const label = state === "saving" ? "Saving…" : state === "loading" ? "Loading…" : "Saved online";
-  return <span className="ml-auto text-xs text-zinc-500">{label}</span>;
+  return null; // saving normally stays out of the way
 }
