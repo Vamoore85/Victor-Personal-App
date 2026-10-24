@@ -79,11 +79,13 @@ export function RecurringBills({ data, categories }: { data: MoneyData; categori
 
       <BillCalendar data={data} onOpen={setOpenId} />
 
-      <Next30 lines={lines} onOpen={setOpenId} />
+      <UpcomingColumns lines={lines} onOpen={setOpenId} />
 
-      <h3 className="-mb-2 text-lg font-semibold tracking-tight">Review bills by company</h3>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-start">
+      <details className="group" data-testid="review-bills">
+        <summary className="cursor-pointer list-none text-lg font-semibold tracking-tight">
+          <span className="mr-1 inline-block transition group-open:rotate-90">›</span> Review and confirm bills
+        </summary>
+      <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-start">
         {COLUMNS.map((e) => (
           <BillColumn
             key={e}
@@ -96,6 +98,7 @@ export function RecurringBills({ data, categories }: { data: MoneyData; categori
           />
         ))}
       </div>
+      </details>
 
       {hidden.length > 0 && (
         <div className="text-sm">
@@ -195,82 +198,84 @@ function BillRow({ r, onOpen }: { r: RecurringRow; onOpen: () => void }) {
   );
 }
 
-const ENTITY_TONE: Record<string, string> = {
-  business: "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200",
-  personal: "bg-sky-100 text-sky-900 dark:bg-sky-900/40 dark:text-sky-200",
-  gladiator: "bg-zinc-200 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200",
+// Company colors on the bills page: Maverick blue, Personal green, Gladiator orange.
+const HEAD: Record<string, string> = {
+  business: "bg-blue-600 text-white",
+  personal: "bg-green-600 text-white",
+  gladiator: "bg-orange-500 text-white",
 };
 
-/** Every bill due in the next 30 days, all companies, in the order they come out. */
-function Next30({ lines, onOpen }: { lines: UpcomingLine[]; onOpen: (id: string) => void }) {
-  const sorted = [...lines].sort((a, b) => a.date.localeCompare(b.date) || b.amount - a.amount);
-  const sum = sorted.reduce((s, l) => s + l.amount, 0);
+/** Next 30 days, one column per company: date, bill and amount, in the order they come out. */
+function UpcomingColumns({ lines, onOpen }: { lines: UpcomingLine[]; onOpen: (id: string) => void }) {
   return (
-    <section className="overflow-hidden rounded-2xl border border-zinc-200 bg-surface dark:border-zinc-800" data-testid="next-30">
-      <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-zinc-100 px-4 py-3 sm:px-5 dark:border-zinc-800">
-        <h3 className="text-2xl font-bold tracking-tight">Next 30 days</h3>
-        <p className="text-base text-zinc-500">
-          {sorted.length} bill{sorted.length === 1 ? "" : "s"} · <span className="text-xl font-semibold text-zinc-900 tabular-nums dark:text-zinc-100">{money(sum)}</span>
-        </p>
-      </header>
-      {sorted.length === 0 ? (
-        <p className="px-4 py-4 text-base text-zinc-500 sm:px-5">No bills expected in the next 30 days.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left" data-testid="next-30-table">
-            <thead>
-              <tr className="bg-zinc-100 text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
-                <th className="border-b border-zinc-200 px-3 py-2 sm:px-5 dark:border-zinc-800">Date</th>
-                <th className="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">Bill</th>
-                <th className="hidden border-b border-zinc-200 px-3 py-2 sm:table-cell dark:border-zinc-800">Company</th>
-                <th className="hidden border-b border-zinc-200 px-3 py-2 md:table-cell dark:border-zinc-800">Paid from</th>
-                <th className="border-b border-zinc-200 px-3 py-2 text-right sm:px-5 dark:border-zinc-800">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((l, i) => {
-                const d = new Date(`${l.date}T12:00:00`);
-                return (
-                  <tr
-                    key={l.key}
-                    className={`${i % 2 ? "bg-zinc-50 dark:bg-zinc-900/40" : ""} ${l.findingId ? "cursor-pointer hover:bg-amber-50 dark:hover:bg-zinc-800" : ""}`}
-                    onClick={() => l.findingId && onOpen(l.findingId)}
-                  >
-                    <td className="whitespace-nowrap border-b border-zinc-100 px-3 py-2.5 sm:px-5 dark:border-zinc-800">
-                      <span className="text-base font-semibold">{d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>{" "}
-                      <span className="block text-xs text-zinc-500 sm:inline">{d.toLocaleDateString("en-US", { weekday: "short" })}</span>
-                    </td>
-                    <td className="border-b border-zinc-100 px-3 py-2.5 text-base font-medium dark:border-zinc-800">
-                      {l.name}
-                      {l.predicted && <span className="ml-2 text-xs font-normal text-zinc-500">expected</span>}
-                      <span className={`mt-1 block w-fit rounded-full px-2 py-0.5 text-xs font-medium sm:hidden ${ENTITY_TONE[l.entity] ?? ENTITY_TONE.gladiator}`}>{entityLabel(l.entity)}</span>
-                    </td>
-                    <td className="hidden border-b border-zinc-100 px-3 py-2.5 sm:table-cell dark:border-zinc-800">
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${ENTITY_TONE[l.entity] ?? ENTITY_TONE.gladiator}`}>{entityLabel(l.entity)}</span>
-                    </td>
-                    <td className="hidden border-b border-zinc-100 px-3 py-2.5 text-sm text-zinc-500 md:table-cell dark:border-zinc-800">{l.account}</td>
-                    <td className="whitespace-nowrap border-b border-zinc-100 px-3 py-2.5 text-right text-lg font-semibold tabular-nums sm:px-5 dark:border-zinc-800">{money(l.amount)}</td>
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-start" data-testid="next-30">
+      {COLUMNS.map((e) => {
+        const rows = lines.filter((l) => l.entity === e).sort((a, b) => a.date.localeCompare(b.date) || b.amount - a.amount);
+        const sum = rows.reduce((x, l) => x + l.amount, 0);
+        return (
+          <section key={e} className="overflow-hidden rounded-2xl border border-zinc-200 bg-surface dark:border-zinc-800" data-testid={`next30-${e}`}>
+            <header className={`flex items-baseline justify-between gap-2 px-4 py-3 ${HEAD[e]}`}>
+              <h3 className="text-2xl font-bold tracking-tight">{entityLabel(e)}</h3>
+              <span className="text-right">
+                <span className="block text-xs font-medium uppercase tracking-wide opacity-80">Next 30 days</span>
+                <span className="text-xl font-semibold tabular-nums">{money(sum)}</span>
+              </span>
+            </header>
+            {rows.length === 0 ? (
+              <p className="px-4 py-4 text-base text-zinc-500">No bills in the next 30 days.</p>
+            ) : (
+              <table className="w-full border-collapse text-left">
+                <thead>
+                  <tr className="bg-zinc-100 text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
+                    <th className="border-b border-zinc-200 px-4 py-2 dark:border-zinc-800">Date</th>
+                    <th className="border-b border-zinc-200 px-2 py-2 dark:border-zinc-800">Bill</th>
+                    <th className="border-b border-zinc-200 px-4 py-2 text-right dark:border-zinc-800">Amount</th>
                   </tr>
-                );
-              })}
-            </tbody>
-            <tfoot>
-              <tr className="bg-zinc-100 font-semibold dark:bg-zinc-900">
-                <td className="px-3 py-2.5 sm:px-5" colSpan={2}>Total, next 30 days</td>
-                <td className="hidden sm:table-cell" />
-                <td className="hidden md:table-cell" />
-                <td className="px-3 py-2.5 text-right text-lg tabular-nums sm:px-5">{money(sum)}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      )}
-    </section>
+                </thead>
+                <tbody>
+                  {rows.map((l, i) => {
+                    const d = new Date(`${l.date}T12:00:00`);
+                    return (
+                      <tr
+                        key={l.key}
+                        className={`${i % 2 ? "bg-zinc-50 dark:bg-zinc-900/40" : ""} ${l.findingId ? "cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800" : ""}`}
+                        onClick={() => l.findingId && onOpen(l.findingId)}
+                      >
+                        <td className="whitespace-nowrap border-b border-zinc-100 px-4 py-2.5 align-top dark:border-zinc-800">
+                          <span className="block text-base font-semibold">{d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                          <span className="block text-xs text-zinc-500">{d.toLocaleDateString("en-US", { weekday: "short" })}</span>
+                        </td>
+                        <td className="border-b border-zinc-100 px-2 py-2.5 align-top dark:border-zinc-800">
+                          <span className="block text-base font-medium">{l.name}</span>
+                          {l.account && <span className="block text-xs text-zinc-500">{l.account}</span>}
+                        </td>
+                        <td className="whitespace-nowrap border-b border-zinc-100 px-4 py-2.5 text-right align-top text-lg font-semibold tabular-nums dark:border-zinc-800">{money(l.amount)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-zinc-100 font-semibold dark:bg-zinc-900">
+                    <td className="px-4 py-2.5" colSpan={2}>Total</td>
+                    <td className="px-4 py-2.5 text-right text-lg tabular-nums">{money(sum)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+          </section>
+        );
+      })}
+    </div>
   );
 }
 
 const WEEKS = 5;
-const DOT: Record<string, string> = { business: "bg-amber-500", personal: "bg-sky-500", gladiator: "bg-zinc-500" };
+const DOT: Record<string, string> = { business: "bg-blue-600", personal: "bg-green-600", gladiator: "bg-orange-500" };
+const CHIP: Record<string, string> = {
+  business: "bg-blue-50 text-blue-900 hover:bg-blue-100 dark:bg-blue-950/50 dark:text-blue-100",
+  personal: "bg-green-50 text-green-900 hover:bg-green-100 dark:bg-green-950/50 dark:text-green-100",
+  gladiator: "bg-orange-50 text-orange-900 hover:bg-orange-100 dark:bg-orange-950/50 dark:text-orange-100",
+};
 
 /** A rolling calendar from this week on: every bill on the day it comes out, colored by company. */
 function BillCalendar({ data, onOpen }: { data: MoneyData; onOpen: (id: string) => void }) {
@@ -289,12 +294,14 @@ function BillCalendar({ data, onOpen }: { data: MoneyData; onOpen: (id: string) 
     <button
       key={l.key}
       onClick={() => l.findingId && onOpen(l.findingId)}
-      className={`flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs leading-tight hover:bg-zinc-100 dark:hover:bg-zinc-800 ${l.predicted ? "" : "font-medium"}`}
+      className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm font-medium leading-tight ${CHIP[l.entity] ?? CHIP.gladiator}`}
       title={`${l.name} · ${money(l.amount)} · ${entityLabel(l.entity)}${l.account ? ` · ${l.account}` : ""}`}
     >
-      <span className={`size-2 shrink-0 rounded-full ${DOT[l.entity] ?? DOT.gladiator}`} />
-      <span className="min-w-0 flex-1 truncate">{l.name}</span>
-      <span className="shrink-0 tabular-nums">{money(l.amount).replace(/\.00$/, "")}</span>
+      <span className={`mt-1 size-2.5 shrink-0 self-start rounded-full ${DOT[l.entity] ?? DOT.gladiator}`} />
+      <span className="min-w-0 flex-1">
+        <span className="line-clamp-2 break-words">{l.name}</span>
+        <span className="block font-bold tabular-nums">{money(l.amount).replace(/\.00$/, "")}</span>
+      </span>
     </button>
   );
 
@@ -308,10 +315,10 @@ function BillCalendar({ data, onOpen }: { data: MoneyData; onOpen: (id: string) 
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <span className="hidden items-center gap-3 text-xs text-zinc-500 sm:flex">
+          <span className="hidden items-center gap-4 text-sm font-medium sm:flex">
             {(["business", "personal", "gladiator"] as const).map((e) => (
               <span key={e} className="flex items-center gap-1">
-                <span className={`size-2 rounded-full ${DOT[e]}`} />
+                <span className={`size-3 rounded-full ${DOT[e]}`} />
                 {entityLabel(e)}
               </span>
             ))}
@@ -336,7 +343,7 @@ function BillCalendar({ data, onOpen }: { data: MoneyData; onOpen: (id: string) 
       <div className="hidden md:block">
         <div className="grid grid-cols-7 border-b border-zinc-100 bg-zinc-50 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900">
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-            <div key={d} className="px-2 py-1.5">{d}</div>
+            <div key={d} className="px-2 py-2 text-sm">{d}</div>
           ))}
         </div>
         <div className="grid grid-cols-7">
@@ -346,14 +353,14 @@ function BillCalendar({ data, onOpen }: { data: MoneyData; onOpen: (id: string) 
             const isToday = d === t;
             const sum = items.reduce((x, l) => x + l.amount, 0);
             return (
-              <div key={d} className={`min-h-24 border-b border-r border-zinc-100 p-1.5 dark:border-zinc-800 ${past ? "bg-zinc-50/60 text-zinc-400 dark:bg-zinc-900/40" : ""}`} data-testid={`cal-${d}`}>
+              <div key={d} className={`min-h-32 border-b border-r border-zinc-100 p-2 dark:border-zinc-800 ${past ? "bg-zinc-50/60 text-zinc-400 dark:bg-zinc-900/40" : ""}`} data-testid={`cal-${d}`}>
                 <div className="mb-1 flex items-center justify-between px-0.5">
-                  <span className={`text-xs font-semibold ${isToday ? "rounded-full bg-brand px-1.5 text-on-brand" : ""}`}>
+                  <span className={`text-sm font-semibold ${isToday ? "rounded-full bg-brand px-2 text-on-brand" : ""}`}>
                     {d.endsWith("-01") || d === days[0] ? label(d, { month: "short", day: "numeric" }) : Number(d.slice(8))}
                   </span>
-                  {sum > 0 && <span className="text-[11px] font-semibold tabular-nums text-zinc-600 dark:text-zinc-300">{money(sum).replace(/\.00$/, "")}</span>}
+                  {sum > 0 && <span className="text-sm font-bold tabular-nums">{money(sum).replace(/\.00$/, "")}</span>}
                 </div>
-                <div className="flex flex-col gap-0.5">{items.map(chip)}</div>
+                <div className="flex flex-col gap-1">{items.map(chip)}</div>
               </div>
             );
           })}
@@ -379,7 +386,7 @@ function BillCalendar({ data, onOpen }: { data: MoneyData; onOpen: (id: string) 
                       <span className="block text-base font-semibold">{label(d, { day: "numeric" })}</span>
                       <span className="block text-xs text-zinc-500">{label(d, { weekday: "short" })}</span>
                     </span>
-                    <div className="min-w-0 flex-1">{(byDay.get(d) ?? []).map(chip)}</div>
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">{(byDay.get(d) ?? []).map(chip)}</div>
                   </div>
                 ))
               )}
