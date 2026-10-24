@@ -30,7 +30,18 @@ declare global {
 
 type SyncAccount = { id: string; name: string; mask: string | null; type: string; subtype: string | null; current: number | null; available?: number | null };
 type SyncTxn = { id: string; accountId: string; amount: number; date: string; name: string; pending: boolean; category: string };
-type SyncResult = { cursor: string; institution: string; accounts: SyncAccount[]; added: SyncTxn[]; modified: SyncTxn[]; removed: string[] };
+type SyncResult = {
+  cursor: string;
+  hasMore?: boolean;
+  updateStatus?: string;
+  institution: string;
+  accounts: SyncAccount[];
+  added: SyncTxn[];
+  modified: SyncTxn[];
+  removed: string[];
+};
+
+export const HISTORY_DONE = "HISTORICAL_UPDATE_COMPLETE";
 
 const STALE_MS = 4 * 60 * 60 * 1000; // sync on open when the last sync is older than this
 
@@ -42,7 +53,7 @@ const STALE_MS = 4 * 60 * 60 * 1000; // sync on open when the last sync is older
  */
 const KEYS_STORAGE = "maverick-plaid-keys";
 type SavedKeys = { keys: string; env: string };
-type ServerKeys = { fromSettings: boolean; env: string | null; site: boolean };
+type ServerKeys = { fromSettings: boolean; env: string | null; site: boolean; check?: { ok: boolean; code?: string; error?: string } };
 type KeysResult = { keys?: string; env: string; site: boolean };
 
 function savedKeys(): SavedKeys | null {
@@ -153,8 +164,23 @@ const signed = (t: Transaction) => (t.kind === "income" ? t.amount : -t.amount);
 export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyData {
   const accounts = [...d.accounts];
   const idFor = new Map<string, string>(); // Plaid account id -> our account id
+  const liveLinks = new Set(d.bankLinks.map((l) => l.id));
+  const adopted = new Set<string>(); // our accounts that just took over this bank account
   for (const pa of r.accounts) {
     let acct = accounts.find((a) => a.plaid?.linkId === link.id && a.plaid.accountId === pa.id);
+    if (!acct && pa.mask) {
+      // The same bank account already here: typed in or filled from statements, or
+      // from a bank connection that was removed. The bank feed takes it over so
+      // nothing is counted twice; its owner stays as you set it.
+      const i = accounts.findIndex(
+        (a) => a.last4 === pa.mask && (a.type === "credit") === (accountType(pa) === "credit") && (!a.plaid || !liveLinks.has(a.plaid.linkId) || a.plaid.linkId === link.id),
+      );
+      if (i >= 0) {
+        acct = { ...accounts[i], plaid: { linkId: link.id, accountId: pa.id } };
+        accounts[i] = acct;
+        adopted.add(acct.id);
+      }
+    }
     if (!acct) {
       acct = {
         id: newId(),
@@ -185,9 +211,10 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
     const prev =
       kept.get(pt.id) ??
       existing.find(
-        (t) => !t.plaidId && !claimed.has(t.id) && t.accountId === accountId && sameCharge(t, pt.date, Math.abs(pt.amount), income ? "income" : "expense"),
+        (t) =>
+          (!t.plaidId || adopted.has(t.accountId)) && !claimed.has(t.id) && t.accountId === accountId && t.plaidId !== pt.id && sameCharge(t, pt.date, Math.abs(pt.amount), income ? "income" : "expense"),
       );
-    if (prev && !prev.plaidId) claimed.add(prev.id);
+    if (prev && prev.plaidId !== pt.id) claimed.add(prev.id);
     incoming.push({
       id: prev?.id ?? newId(),
       date: pt.date,
@@ -224,23 +251,56 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
     transactions,
     bankLinks: d.bankLinks.map((l) =>
       l.id === link.id
-        ? { ...l, cursor: r.cursor, institution: l.institution || r.institution, lastSync: new Date().toISOString(), error: undefined }
+        ? {
+            ...l,
+            cursor: r.cursor,
+            institution: l.institution || r.institution,
+            lastSync: new Date().toISOString(),
+            historyStatus: r.updateStatus || l.historyStatus,
+            error: undefined,
+            errorCode: undefined,
+          }
         : l,
     ),
   };
 }
 
-async function syncLink(link: BankLink) {
+const latestCursor: Record<string, string> = {};
+
+/**
+ * Brings a bank up to date. A big first sync comes in several calls; each one
+ * is saved as it arrives. Returns Plaid's history status.
+ */
+async function syncLink(link: BankLink): Promise<string | undefined> {
+  let cursor = link.cursor;
   try {
-    const r = await api<SyncResult>("sync", { link: link.link, cursor: link.cursor });
-    setMoneyData((d) => {
-      const current = d.bankLinks.find((l) => l.id === link.id);
-      return current ? applySync(d, current, r) : d;
-    });
+    for (let round = 0; round < 12; round++) {
+      const r = await api<SyncResult>("sync", { link: link.link, cursor });
+      cursor = r.cursor;
+      latestCursor[link.id] = r.cursor;
+      setMoneyData((d) => {
+        const current = d.bankLinks.find((l) => l.id === link.id);
+        return current ? applySync(d, current, r) : d;
+      });
+      if (!r.hasMore) return r.updateStatus;
+    }
   } catch (e) {
-    const message = (e as Error).message;
-    setMoneyData((d) => ({ ...d, bankLinks: d.bankLinks.map((l) => (l.id === link.id ? { ...l, error: message } : l)) }));
+    const err = e as Error & { code?: string };
+    setMoneyData((d) => ({ ...d, bankLinks: d.bankLinks.map((l) => (l.id === link.id ? { ...l, error: err.message, errorCode: err.code } : l)) }));
   }
+  return undefined;
+}
+
+/** Right after connecting, Plaid needs a little while to gather history. Check back a few times. */
+async function firstSync(link: BankLink, onWait: (n: number) => void) {
+  let status = await syncLink(link);
+  for (let i = 0; i < 8 && (status === "NOT_READY" || status === undefined || status === ""); i++) {
+    onWait(i + 1);
+    await new Promise((res) => setTimeout(res, 5000));
+    const current = { ...link, cursor: latestCursor[link.id] ?? link.cursor };
+    status = await syncLink(current);
+  }
+  return status;
 }
 
 function timeAgo(iso?: string) {
@@ -259,13 +319,18 @@ export function useAutoSync(data: MoneyData | null) {
   useEffect(() => {
     if (!data || started.current) return;
     started.current = true;
-    const stale = data.bankLinks.filter((l) => !l.error && (!l.lastSync || Date.now() - new Date(l.lastSync).getTime() > STALE_MS));
+    const age = (l: BankLink) => (l.lastSync ? Date.now() - new Date(l.lastSync).getTime() : Infinity);
+    // Banks still loading their history are checked again sooner.
+    const stale = data.bankLinks.filter((l) => !l.error && age(l) > (l.historyStatus === HISTORY_DONE ? STALE_MS : 10 * 60 * 1000));
     stale.forEach((l) => void syncLink(l));
   }, [data]);
 }
 
 export function BankLinks({ data }: { data: MoneyData }) {
-  const scope = useDefaultScope();
+  const defaultScope = useDefaultScope();
+  const [owner, setOwner] = useState<Scope | "">("");
+  const scope: Scope = owner || defaultScope;
+  const [waiting, setWaiting] = useState("");
   const [server, setServer] = useState<ServerKeys | null>(null);
   const [local, setLocal] = useState<SavedKeys | null>(null);
   const [editingKeys, setEditingKeys] = useState(false);
@@ -274,7 +339,8 @@ export function BankLinks({ data }: { data: MoneyData }) {
 
   useEffect(() => {
     setLocal(savedKeys());
-    api<ServerKeys>("status")
+    fetch("/api/plaid/status?check=1")
+      .then((r) => r.json() as Promise<ServerKeys>)
       .then(setServer)
       .catch(() => setServer({ fromSettings: false, env: null, site: false }));
   }, []);
@@ -325,10 +391,15 @@ export function BankLinks({ data }: { data: MoneyData }) {
       const publicToken = await openLink(linkToken);
       if (!publicToken) return;
       const { itemId, link } = await api<{ itemId: string; link: string }>("exchange", { publicToken });
-      const bank: BankLink = { id: newId(), itemId, institution: "", link, cursor: "", scope };
+      const bank: BankLink = { id: newId(), itemId, institution: "", link, cursor: "", scope, connectedAt: new Date().toISOString() };
       setMoneyData((d) => ({ ...d, bankLinks: [...d.bankLinks, bank] }));
       setBusy(bank.id);
-      await syncLink(bank);
+      const st = await firstSync(bank, (n) => setWaiting(`Plaid is gathering your history (check ${n} of 8)…`));
+      setWaiting(
+        st === HISTORY_DONE
+          ? ""
+          : "Connected. Plaid is still loading older history from the bank; it fills in on its own over the next few minutes to hours, and Sync now picks up what's arrived.",
+      );
     } catch (e) {
       setMessage((e as Error).message);
     } finally {
@@ -339,7 +410,8 @@ export function BankLinks({ data }: { data: MoneyData }) {
   async function sync(link: BankLink) {
     setMessage("");
     setBusy(link.id);
-    await syncLink(link);
+    const st = await syncLink(link);
+    if (st && st !== HISTORY_DONE) setWaiting(`${link.institution || "The bank"}: Plaid is still loading older history.`);
     setBusy(null);
   }
 
@@ -379,30 +451,53 @@ export function BankLinks({ data }: { data: MoneyData }) {
   }
 
   const notReady = status && !status.configured;
+  const check = server?.check;
   return (
-    <Card
-      title="Connected banks"
-      action={
+    <Card title="Connected banks">
+      <div className="mb-3 flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1 text-xs text-zinc-500">
+          New accounts belong to
+          <select
+            className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            value={scope}
+            onChange={(e) => setOwner(e.target.value as Scope)}
+          >
+            {SCOPES.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.value === "gladiator" ? "Gladiator" : `Personal / Maverick: ${o.label}`}
+              </option>
+            ))}
+          </select>
+        </label>
         <button className={buttonClass} onClick={connect} disabled={!status?.configured || busy !== null}>
-          {busy === "new" ? "Connecting…" : "Connect a bank"}
+          {busy === "new" ? "Connecting…" : "Connect bank or card"}
         </button>
-      }
-    >
+      </div>
+      {server && (
+        <p className="mb-3 text-xs" data-testid="plaid-status">
+          {!status?.configured ? (
+            <span className="text-rose-600 dark:text-rose-400">Plaid isn&apos;t set up: no keys are saved for this site.</span>
+          ) : check?.ok === false ? (
+            <span className="text-rose-600 dark:text-rose-400">
+              Plaid keys are saved ({status.env === "production" ? "Production" : "Sandbox"}) but Plaid refused them: {check.error}
+            </span>
+          ) : (
+            <span className="text-zinc-500">
+              Plaid {status.env === "production" ? "Production (your real banks)" : "Sandbox (test banks)"}
+              {check?.ok ? " · keys checked and working" : ""}
+              {server.fromSettings ? " · keys from Vercel settings" : server.site ? " · keys saved for your whole site" : " · keys saved on this device"}
+            </span>
+          )}
+        </p>
+      )}
       {server && !server.fromSettings && (notReady || editingKeys ? (
-        <PlaidKeysForm onSaved={keysSaved} onCancel={local ? () => setEditingKeys(false) : undefined} />
+        <PlaidKeysForm onSaved={keysSaved} onCancel={local || shared ? () => setEditingKeys(false) : undefined} />
       ) : (
         <p className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
-          <span>
-            Plaid keys saved {server.site ? "for your whole site" : "on this device"} ({status?.env === "production" ? "Live banks" : "Test mode"}).
-          </span>
           <button className="underline hover:text-brand" onClick={() => setEditingKeys(true)} disabled={busy !== null}>
             Change keys
           </button>
-          <button
-            className="underline hover:text-rose-600"
-            onClick={removeKeys}
-            disabled={busy !== null}
-          >
+          <button className="underline hover:text-rose-600" onClick={removeKeys} disabled={busy !== null}>
             Remove keys
           </button>
         </p>
@@ -414,30 +509,66 @@ export function BankLinks({ data }: { data: MoneyData }) {
         </p>
       )}
       {message && <p className="mb-3 text-sm text-rose-600 dark:text-rose-400">{message}</p>}
+      {waiting && <p className="mb-3 text-sm text-amber-700 dark:text-amber-400">{waiting}</p>}
       {data.bankLinks.length === 0 ? (
-        <Empty>Connect your bank and card accounts to bring in balances and transactions automatically.</Empty>
+        <Empty>Connect your bank and card accounts to bring in balances and transactions automatically. You sign in to your bank inside Plaid&apos;s own window; Maverick never sees your bank password.</Empty>
       ) : (
         <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
           {data.bankLinks.map((l) => {
             const accts = data.accounts.filter((a) => a.plaid?.linkId === l.id);
+            const loginNeeded = l.errorCode === "ITEM_LOGIN_REQUIRED" || l.errorCode === "PENDING_EXPIRATION" || l.errorCode === "PENDING_DISCONNECT";
+            const badSeal = l.errorCode === "BAD_SEAL";
             return (
-              <li key={l.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                <div className="min-w-0">
-                  <p className="font-medium">
+              <li key={l.id} className="flex flex-col gap-2 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="min-w-0 flex-1 font-medium">
                     {l.institution || "Bank"}
                     <ScopeBadge item={l} />
                   </p>
-                  <p className="text-xs text-zinc-500">
-                    {accts.length} account{accts.length === 1 ? "" : "s"} · {busy === l.id ? "Syncing…" : timeAgo(l.lastSync)}
-                  </p>
-                  {l.error && <p className="mt-1 text-xs text-rose-600 dark:text-rose-400">{l.error}</p>}
-                  {accts.length > 0 && (
-                    <ul className="mt-2 flex flex-col gap-1.5">
-                      {accts.map((a) => (
-                        <li key={a.id} className="flex flex-wrap items-center gap-2 text-sm">
-                          <span className="min-w-0 truncate">
-                            {a.name}
-                            {a.last4 && <span className="text-zinc-500"> ··{a.last4}</span>}
+                  {l.error && !badSeal && (
+                    <button className={ghostButtonClass} onClick={() => fix(l)} disabled={busy !== null}>
+                      Sign in again
+                    </button>
+                  )}
+                  <button className={ghostButtonClass} onClick={() => sync(l)} disabled={busy !== null || !status?.configured}>
+                    {busy === l.id ? "Syncing…" : "Sync now"}
+                  </button>
+                  <button className="text-xs text-zinc-400 hover:text-rose-600" onClick={() => disconnect(l)} disabled={busy !== null}>
+                    Disconnect
+                  </button>
+                </div>
+                <p className="text-xs text-zinc-500">
+                  {l.error ? (
+                    <span className="text-rose-600 dark:text-rose-400">
+                      {loginNeeded ? "The bank needs you to sign in again. " : badSeal ? "This connection was made with different Plaid keys; disconnect it and connect again. " : "Last sync failed: "}
+                      {!loginNeeded && !badSeal && l.error}
+                    </span>
+                  ) : (
+                    <>
+                      {timeAgo(l.lastSync)}
+                      {l.historyStatus && l.historyStatus !== HISTORY_DONE && " · Plaid is still loading older history"}
+                      {l.historyStatus === HISTORY_DONE && " · all the history the bank provides has arrived"}
+                    </>
+                  )}
+                </p>
+                {accts.length > 0 && (
+                  <ul className="flex flex-col gap-1.5">
+                    {accts.map((a) => {
+                      const ts = data.transactions.filter((t) => t.accountId === a.id && t.plaidId);
+                      const dates = ts.map((t) => t.date).sort();
+                      const bb = a.bankBalance;
+                      return (
+                        <li key={a.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-zinc-50 px-2 py-1.5 text-sm dark:bg-zinc-900">
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate">
+                              {a.name}
+                              {a.last4 && <span className="text-zinc-500"> ··{a.last4}</span>}
+                            </span>
+                            <span className="block text-xs text-zinc-500">
+                              {bb ? `${bb.available !== null ? `${fmtMoney(bb.available)} available` : `${fmtMoney(bb.current ?? 0)} balance`} as of ${new Date(bb.asOf).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : "No balance yet"}
+                              {" · "}
+                              {dates.length ? `bank feed ${dates[0]} to ${dates[dates.length - 1]} (${ts.length})` : "no bank-feed transactions yet"}
+                            </span>
                           </span>
                           <select
                             aria-label={`Whose is ${a.name}`}
@@ -452,23 +583,10 @@ export function BankLinks({ data }: { data: MoneyData }) {
                             ))}
                           </select>
                         </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  {l.error && (
-                    <button className={ghostButtonClass} onClick={() => fix(l)} disabled={busy !== null}>
-                      Sign in again
-                    </button>
-                  )}
-                  <button className={ghostButtonClass} onClick={() => sync(l)} disabled={busy !== null || !status?.configured}>
-                    Sync now
-                  </button>
-                  <button className="text-xs text-zinc-400 hover:text-rose-600" onClick={() => disconnect(l)} disabled={busy !== null}>
-                    Disconnect
-                  </button>
-                </div>
+                      );
+                    })}
+                  </ul>
+                )}
               </li>
             );
           })}
@@ -477,6 +595,8 @@ export function BankLinks({ data }: { data: MoneyData }) {
     </Card>
   );
 }
+
+const fmtMoney = (n: number | null) => (n === null ? "—" : n.toLocaleString("en-US", { style: "currency", currency: "USD" }));
 
 const inputClass =
   "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-ember/50";

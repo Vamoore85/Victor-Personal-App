@@ -211,6 +211,11 @@ export type BankLink = {
   cursor: string;
   lastSync?: string; // ISO time of the last successful sync
   error?: string; // why the last sync failed, cleared on success
+  errorCode?: string; // Plaid's code for that failure, e.g. ITEM_LOGIN_REQUIRED
+  // How far Plaid has got loading this bank's history: NOT_READY,
+  // INITIAL_UPDATE_COMPLETE (recent days only) or HISTORICAL_UPDATE_COMPLETE.
+  historyStatus?: string;
+  connectedAt?: string; // ISO time the bank was connected
   scope?: Scope;
 };
 

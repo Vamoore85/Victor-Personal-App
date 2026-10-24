@@ -511,6 +511,8 @@ function DrillSheet({ drill, d, update, accountName, onClose }: { drill: Drill; 
               <span className="flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 sm:pl-26">
                 <span className="truncate">{accountName(x.t.accountId)}</span>
                 <span>·</span>
+                <span>{x.t.plaidId ? "Bank feed (Plaid)" : "Statement or typed in"}</span>
+                <span>·</span>
                 <span>{x.t.category || "Uncategorized"}</span>
                 <span className="text-zinc-400">({x.categorySource === "you" ? "set by you" : "automatic"})</span>
                 {x.suggestion && (
