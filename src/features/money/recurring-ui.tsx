@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { confirmFinding, setFindingStatus } from "./bill-intel";
 import { BillDetail } from "./bill-intel-ui";
-import { money } from "./calc";
+import { addDays, money, today } from "./calc";
 import { CONFIDENCE_LABEL, STATUS_LABEL, cadenceWord, entityLabel, recurringRows, splitFinding, upcoming, total, type BillStatus, type RecurringRow, type UpcomingLine } from "./outlook";
 import { useBillScan } from "./outlook-ui";
 import { newId, setMoneyData } from "./store";
@@ -77,7 +77,11 @@ export function RecurringBills({ data, categories }: { data: MoneyData; categori
         </div>
       </header>
 
+      <BillCalendar data={data} onOpen={setOpenId} />
+
       <Next30 lines={lines} onOpen={setOpenId} />
+
+      <h3 className="-mb-2 text-lg font-semibold tracking-tight">Review bills by company</h3>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-start">
         {COLUMNS.map((e) => (
@@ -261,6 +265,128 @@ function Next30({ lines, onOpen }: { lines: UpcomingLine[]; onOpen: (id: string)
           </table>
         </div>
       )}
+    </section>
+  );
+}
+
+const WEEKS = 5;
+const DOT: Record<string, string> = { business: "bg-amber-500", personal: "bg-sky-500", gladiator: "bg-zinc-500" };
+
+/** A rolling calendar from this week on: every bill on the day it comes out, colored by company. */
+function BillCalendar({ data, onOpen }: { data: MoneyData; onOpen: (id: string) => void }) {
+  const [offset, setOffset] = useState(0); // in weeks from this week
+  const t = today();
+  const weekStart = addDays(t, -new Date(`${t}T12:00:00`).getDay() + offset * 7);
+  const end = addDays(weekStart, WEEKS * 7 - 1);
+  const lines = useMemo(() => upcoming(data, Math.max(1, Math.round((Date.parse(`${end}T12:00:00`) - Date.parse(`${t}T12:00:00`)) / 864e5) + 1)), [data, end, t]);
+  const byDay = new Map<string, UpcomingLine[]>();
+  for (const l of lines) if (l.date >= weekStart && l.date <= end) byDay.set(l.date, [...(byDay.get(l.date) ?? []), l]);
+  const days = Array.from({ length: WEEKS * 7 }, (_, i) => addDays(weekStart, i));
+  const label = (ymd: string, o: Intl.DateTimeFormatOptions) => new Date(`${ymd}T12:00:00`).toLocaleDateString("en-US", o);
+  const rangeTotal = [...byDay.values()].flat().reduce((sum, l) => sum + l.amount, 0);
+
+  const chip = (l: UpcomingLine) => (
+    <button
+      key={l.key}
+      onClick={() => l.findingId && onOpen(l.findingId)}
+      className={`flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs leading-tight hover:bg-zinc-100 dark:hover:bg-zinc-800 ${l.predicted ? "" : "font-medium"}`}
+      title={`${l.name} · ${money(l.amount)} · ${entityLabel(l.entity)}${l.account ? ` · ${l.account}` : ""}`}
+    >
+      <span className={`size-2 shrink-0 rounded-full ${DOT[l.entity] ?? DOT.gladiator}`} />
+      <span className="min-w-0 flex-1 truncate">{l.name}</span>
+      <span className="shrink-0 tabular-nums">{money(l.amount).replace(/\.00$/, "")}</span>
+    </button>
+  );
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-zinc-200 bg-surface dark:border-zinc-800" data-testid="bill-calendar">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-100 px-4 py-3 sm:px-5 dark:border-zinc-800">
+        <div>
+          <h3 className="text-2xl font-bold tracking-tight">Bill calendar</h3>
+          <p className="text-sm text-zinc-500">
+            {label(weekStart, { month: "short", day: "numeric" })} to {label(end, { month: "short", day: "numeric" })} · <span className="font-semibold text-zinc-900 tabular-nums dark:text-zinc-100">{money(rangeTotal)}</span>
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="hidden items-center gap-3 text-xs text-zinc-500 sm:flex">
+            {(["business", "personal", "gladiator"] as const).map((e) => (
+              <span key={e} className="flex items-center gap-1">
+                <span className={`size-2 rounded-full ${DOT[e]}`} />
+                {entityLabel(e)}
+              </span>
+            ))}
+          </span>
+          <div className="flex gap-1">
+            <button className="rounded-full border border-zinc-300 px-3 py-1 text-sm disabled:opacity-40 dark:border-zinc-700" onClick={() => setOffset((o) => o - 4)} disabled={offset <= 0} aria-label="Earlier weeks">
+              ‹
+            </button>
+            {offset > 0 && (
+              <button className="rounded-full border border-zinc-300 px-3 py-1 text-sm dark:border-zinc-700" onClick={() => setOffset(0)}>
+                Today
+              </button>
+            )}
+            <button className="rounded-full border border-zinc-300 px-3 py-1 text-sm disabled:opacity-40 dark:border-zinc-700" onClick={() => setOffset((o) => o + 4)} disabled={offset >= 48} aria-label="Later weeks">
+              ›
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Desktop and tablet: a month-style grid, Sunday to Saturday. */}
+      <div className="hidden md:block">
+        <div className="grid grid-cols-7 border-b border-zinc-100 bg-zinc-50 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+            <div key={d} className="px-2 py-1.5">{d}</div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7">
+          {days.map((d) => {
+            const items = byDay.get(d) ?? [];
+            const past = d < t;
+            const isToday = d === t;
+            const sum = items.reduce((x, l) => x + l.amount, 0);
+            return (
+              <div key={d} className={`min-h-24 border-b border-r border-zinc-100 p-1.5 dark:border-zinc-800 ${past ? "bg-zinc-50/60 text-zinc-400 dark:bg-zinc-900/40" : ""}`} data-testid={`cal-${d}`}>
+                <div className="mb-1 flex items-center justify-between px-0.5">
+                  <span className={`text-xs font-semibold ${isToday ? "rounded-full bg-brand px-1.5 text-on-brand" : ""}`}>
+                    {d.endsWith("-01") || d === days[0] ? label(d, { month: "short", day: "numeric" }) : Number(d.slice(8))}
+                  </span>
+                  {sum > 0 && <span className="text-[11px] font-semibold tabular-nums text-zinc-600 dark:text-zinc-300">{money(sum).replace(/\.00$/, "")}</span>}
+                </div>
+                <div className="flex flex-col gap-0.5">{items.map(chip)}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Phone: one row per day that has a bill, grouped by week. */}
+      <div className="md:hidden">
+        {Array.from({ length: WEEKS }, (_, w) => {
+          const week = days.slice(w * 7, w * 7 + 7);
+          const withBills = week.filter((d) => byDay.has(d) && d >= t);
+          return (
+            <div key={w} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
+              <p className="bg-zinc-50 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:bg-zinc-900">
+                Week of {label(week[0], { month: "short", day: "numeric" })}
+              </p>
+              {withBills.length === 0 ? (
+                <p className="px-4 py-2 text-sm text-zinc-400">No bills</p>
+              ) : (
+                withBills.map((d) => (
+                  <div key={d} className="flex gap-3 px-4 py-2">
+                    <span className="w-12 shrink-0">
+                      <span className="block text-base font-semibold">{label(d, { day: "numeric" })}</span>
+                      <span className="block text-xs text-zinc-500">{label(d, { weekday: "short" })}</span>
+                    </span>
+                    <div className="min-w-0 flex-1">{(byDay.get(d) ?? []).map(chip)}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }
