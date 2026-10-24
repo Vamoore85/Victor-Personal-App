@@ -53,7 +53,11 @@ const DETAILS: { id: string; label: string; scoped?: boolean }[] = [
 export function FinancialCenter() {
   const data = useMoneyData();
   const cloud = useCloudState();
-  const [chosenTab, setTab] = useState<string | null>(() => (readQuickBooksNotice() ? "books" : null));
+  const [chosenTab, setTab] = useState<string | null>(() => {
+    if (readQuickBooksNotice()) return "books";
+    const asked = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("tab") : null;
+    return asked && [...MAIN, ...DETAILS].some((t) => t.id === asked) ? asked : null;
+  });
   const [view, setView] = useState<ScopeView>(() => {
     try {
       const saved = typeof window !== "undefined" ? window.localStorage.getItem("maverick.money.view") : null;
