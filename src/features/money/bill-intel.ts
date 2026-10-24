@@ -92,7 +92,7 @@ const CARD_PAYMENT = /\b(CRD PMT|CARD ?PAYMENT|CREDIT CARD|CC PMT|EPAYMENT|E-PAY
 export const isCardPayment = (t: Transaction) => t.category === "Debt payments" || CARD_PAYMENT.test(t.description);
 
 /** Bump when the rules below change, so saved scans are redone. */
-export const SCAN_RULES = 2;
+export const SCAN_RULES = 3;
 
 export function isCandidate(t: Transaction, direction: "out" | "in") {
   if (direction === "out" && t.kind === "expense" && t.amount > 0 && t.transferId !== "imported" && isCardPayment(t) && !/\b(REFUND|REVERSAL|RETURN)\b/i.test(t.description)) return true;
@@ -257,12 +257,13 @@ function mostCommon(xs: string[]) {
 export function detectRecurring(d: MoneyData, today = todayYmd()) {
   const windowStart = addDays(today, -SCAN_DAYS);
   const scopeOf = new Map(d.accounts.map((a) => [a.id, a.scope ?? "personal"]));
+  const unassigned = new Set(d.accounts.filter((a) => a.needsEntity).map((a) => a.id)); // no company yet: not looked at
   const inWindow = d.transactions.filter((t) => t.date >= windowStart && t.date <= today);
   const found: Detected[] = [];
   for (const direction of ["out", "in"] as const) {
     const groups = new Map<string, { scope: Scope; key: string; txns: Transaction[] }>();
     for (const t of inWindow) {
-      if (!isCandidate(t, direction)) continue;
+      if (unassigned.has(t.accountId) || !isCandidate(t, direction)) continue;
       const key = merchantKey(t.description);
       if (!key) continue;
       const scope = scopeOf.get(t.accountId) ?? "personal";

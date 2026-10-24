@@ -3,6 +3,7 @@ import { asMoney, MONEY_DOC, updateMoney } from "@/lib/money-doc";
 import { credsFrom, handle, PlaidError, unseal } from "@/lib/plaid-server";
 import { pullChanges } from "@/lib/plaid-sync";
 import { applySync, type SyncResult } from "@/features/money/plaid-apply";
+import { cleanAccounts } from "@/features/money/accounts-fix";
 import type { BankLink } from "@/features/money/types";
 
 /*
@@ -35,7 +36,8 @@ export const POST = handle(async (body) => {
   const only = Array.isArray(body.only) ? new Set(body.only.map(String)) : null;
   const start = Date.now();
   const doc = asMoney((await readDoc(MONEY_DOC).catch(dbFailed))?.data);
-  const links = doc.bankLinks.filter((l) => (only ? only.has(l.id) : !NEEDS_YOU.has(l.errorCode ?? "")));
+  // A connection that only reaches accounts an older connection already feeds isn't synced: it would only make copies.
+  const links = doc.bankLinks.filter((l) => !l.duplicateOf && (only ? only.has(l.id) : !NEEDS_YOU.has(l.errorCode ?? "")));
 
   const pulled = new Map<string, SyncResult[]>();
   const report: RefreshLink[] = [];
@@ -78,7 +80,8 @@ export const POST = handle(async (body) => {
       }
       if (!r.ok) next = { ...next, bankLinks: next.bankLinks.map((x): BankLink => (x.id === r.id ? { ...x, error: r.error, errorCode: r.code } : x)) };
     }
-    return next;
+    // A bank connected twice gives the same accounts twice: fold them into one before saving.
+    return cleanAccounts(next).data;
   }).catch(dbFailed);
 
   // Counts and codes only, for the hosting's logs.

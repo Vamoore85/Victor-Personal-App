@@ -17,6 +17,8 @@ export const ENTITIES: { id: Scope; label: string }[] = [
 
 export const entityLabel = (s: Scope | undefined) => ENTITIES.find((e) => e.id === (s ?? "personal"))!.label;
 export const entityOf = (a: Account | undefined): Scope => a?.scope ?? "personal";
+/** Accounts with no company yet count toward none of them. */
+const counts = (a: Account | undefined) => !!a && !a.needsEntity;
 
 const isCash = (a: Account) => a.type === "checking" || a.type === "savings";
 
@@ -87,7 +89,7 @@ export function balances(d: MoneyData, now = Date.now()): EntityBalance[] {
   };
   const r2 = (n: number) => Math.round(n * 100) / 100;
   return ENTITIES.map(({ id }) => {
-    const mine = d.accounts.filter((x) => entityOf(x) === id);
+    const mine = d.accounts.filter((x) => counts(x) && entityOf(x) === id && !(x.plaid && d.bankLinks.find((l) => l.id === x.plaid!.linkId)?.duplicateOf));
     const accounts = mine.filter(isCash).map(line);
     const cards = mine.filter(isDebt).map(line);
     const counted = accounts.filter((x) => x.amount !== null);
@@ -143,6 +145,7 @@ export function upcoming(d: MoneyData, days = 30, t = todayYmd()): UpcomingLine[
 
   for (const b of d.bills) {
     if (b.recurringId) billsFromFindings.add(b.recurringId);
+    if (b.accountId && acct.get(b.accountId)?.needsEntity) continue;
     for (const { date, paid } of billDatesBetween(b, t, end)) {
       if (paid) continue; // already marked paid
       const a = b.accountId ? acct.get(b.accountId) : undefined;
@@ -162,6 +165,7 @@ export function upcoming(d: MoneyData, days = 30, t = todayYmd()): UpcomingLine[
   }
 
   for (const f of d.recurring) {
+    if (f.accountIds.length && !f.accountIds.some((id) => counts(acct.get(id)))) continue;
     if (f.direction !== "out" || f.status === "dismissed" || billsFromFindings.has(f.id) || (f.billId && d.bills.some((b) => b.id === f.billId))) continue;
     const e = effective(f);
     let date = e.nextDate;
@@ -219,8 +223,9 @@ export type RecurringRow = {
  */
 export function recurringRows(d: MoneyData): RecurringRow[] {
   const acct = new Map(d.accounts.map((a) => [a.id, a.name]));
+  const assigned = new Set(d.accounts.filter(counts).map((a) => a.id));
   return d.recurring
-    .filter((f) => f.direction === "out" && f.status !== "dismissed" && f.occurrences.length > 0)
+    .filter((f) => f.direction === "out" && f.status !== "dismissed" && f.occurrences.length > 0 && (!f.accountIds.length || f.accountIds.some((id) => assigned.has(id))))
     .map((f) => {
       const e = effective(f);
       const last = [...f.occurrences].sort((a, b) => b.date.localeCompare(a.date))[0];
@@ -286,6 +291,7 @@ export function transactionRows(d: MoneyData, query = ""): TxnRow[] {
   const acct = new Map(d.accounts.map((a) => [a.id, a]));
   const q = query.trim().toLowerCase();
   return d.transactions
+    .filter((t) => counts(acct.get(t.accountId)))
     .map((t) => {
       const a = acct.get(t.accountId);
       return { t, entity: entityOf(a), account: a?.name ?? "Removed account", signed: t.kind === "income" ? t.amount : -t.amount };

@@ -31,7 +31,7 @@ export const scopeOf = (item: { scope?: Scope }): Scope => item.scope ?? "person
 export function filterByScope(data: MoneyData, view: ScopeView): MoneyData {
   if (view === "all") return data;
   const inView = (x: { scope?: Scope }) => scopeOf(x) === view;
-  const accounts = data.accounts.filter(inView);
+  const accounts = data.accounts.filter((a) => !a.needsEntity && inView(a)); // unassigned accounts belong to no company yet
   const accountIds = new Set(accounts.map((a) => a.id));
   return {
     ...data,

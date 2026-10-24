@@ -8,6 +8,8 @@ import { DEFAULT_CATEGORIES } from "./types";
 import { categoriesInUse, today } from "./calc";
 import { Accounts, Budgets, Transactions } from "./sections";
 import { Overview } from "./outlook-ui";
+import { AssignAccounts } from "./assign-ui";
+import { assignedOnly } from "./accounts-fix";
 import { RecurringBills } from "./recurring-ui";
 import { Bills } from "./bill-intel-ui";
 import { Spending } from "./spending-ui";
@@ -202,10 +204,11 @@ export function FinancialCenter() {
       )}
 
       {tab === "overview" && <Overview data={data} onSettings={() => setTab("accounts")} />}
-      {tab === "spending" && <Spending data={data} goTo={setTab} initialEntity="all" />}
+      {tab === "spending" && <Spending data={assignedOnly(data)} goTo={setTab} initialEntity="all" />}
       {tab === "bills" && <RecurringBills data={data} categories={categories} />}
       {tab === "accounts" && (
         <>
+          <AssignAccounts data={data} />
           <BankLinks
             data={data}
             onBriefing={() => {

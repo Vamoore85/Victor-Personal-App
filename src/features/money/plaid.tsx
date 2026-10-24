@@ -7,6 +7,7 @@ import type { Scope, BankLink, MoneyData } from "./types";
 import { Card, Empty, buttonClass, ghostButtonClass } from "./ui";
 import { HISTORY_DONE, saveBriefing } from "./briefing";
 import { setMode } from "./intel-shared";
+import { assignEntity } from "./accounts-fix";
 
 /*
  * Connect banks and cards through Plaid. Plaid Link (Plaid's own sign-in
@@ -280,7 +281,7 @@ async function runSync(link: BankLink, trigger: "first-sync" | "sync"): Promise<
 
 /** Syncs every connected bank that can sync without you. Resolves when all are done. */
 export async function syncAll(trigger: "first-sync" | "sync" = "sync") {
-  const links = (getMoneyData()?.bankLinks ?? []).filter((l) => !needsYou(l));
+  const links = (getMoneyData()?.bankLinks ?? []).filter((l) => !needsYou(l) && !l.duplicateOf);
   const results = await Promise.all(startSync(links, trigger));
   const ok = results.filter((r) => r !== undefined).length;
   return { at: new Date().toISOString(), ok, failed: links.length - ok };
@@ -327,7 +328,7 @@ export function useAutoSync(data: MoneyData | null) {
       if (!d) return;
       const age = (l: BankLink) => (l.lastSync ? Date.now() - new Date(l.lastSync).getTime() : Infinity);
       const due = d.bankLinks.filter((l) => {
-        if (needsYou(l)) return false;
+        if (needsYou(l) || l.duplicateOf) return false;
         // A failed bank is retried once each time the page opens, not in a loop.
         if (l.error) return !tried.current.has(l.id);
         // A connection whose account is also kept as a leftover copy is synced once per visit, which merges the two.
@@ -354,8 +355,7 @@ export function useAutoSync(data: MoneyData | null) {
 
 export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: () => void }) {
   const defaultScope = useDefaultScope();
-  const [owner, setOwner] = useState<Scope | "">("");
-  const scope: Scope = owner || defaultScope;
+  const scope: Scope = defaultScope; // only tags the connection; each account's company is assigned separately
   const [waiting, setWaiting] = useState("");
   const [briefingReady, setBriefingReady] = useState(false);
   const [server, setServer] = useState<ServerKeys | null>(null);
@@ -478,7 +478,7 @@ export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: 
 
   /** Moves a connected account to Personal, Maverick or Gladiator; its transactions re-sort on save. */
   function moveAccount(id: string, to: Scope) {
-    setMoneyData((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, scope: to } : a)) }));
+    setMoneyData((d) => assignEntity(d, id, to));
   }
 
   async function disconnect(link: BankLink) {
@@ -506,20 +506,7 @@ export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: 
     <Card title="Connected banks">
       <SyncCheck />
       <div className="mb-3 flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1 text-xs text-zinc-500">
-          New accounts belong to
-          <select
-            className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            value={scope}
-            onChange={(e) => setOwner(e.target.value as Scope)}
-          >
-            {SCOPES.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.value === "gladiator" ? "Gladiator" : `Personal / Maverick: ${o.label}`}
-              </option>
-            ))}
-          </select>
-        </label>
+        <p className="text-xs text-zinc-500">New accounts start as &ldquo;Needs assignment&rdquo;; you pick each one&apos;s company above.</p>
         <button className={buttonClass} onClick={connect} disabled={!status?.configured || busy !== null}>
           {busy === "new" ? "Connecting…" : "Connect bank or card"}
         </button>

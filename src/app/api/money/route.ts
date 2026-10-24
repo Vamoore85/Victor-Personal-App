@@ -2,7 +2,8 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import { connection } from "next/server";
 import { databaseUrl, dbConfigured, readDoc, writeDoc } from "@/lib/db";
 import { applyPendingImport } from "@/lib/pending-import";
-import { accountDiag } from "@/lib/money-doc";
+import { accountDiag, asMoney } from "@/lib/money-doc";
+import { cleanAccounts } from "@/features/money/accounts-fix";
 import { sameOrigin, signedIn } from "@/lib/plaid-server";
 
 // Cloud copy of the Financial Center. The browser keeps a local copy too and
@@ -60,7 +61,16 @@ export async function GET(req: Request) {
       const saved = await writeDoc(KEY, doc?.rev ?? 0, merged);
       if (saved.ok) doc = { rev: saved.rev, data: merged };
     }
-    if (doc?.data) console.log(`money accounts: ${accountDiag(doc.data)}`);
+    // Each real bank account once, with the company you gave it (see accounts-fix.ts). Saved back right away.
+    if (doc?.data) {
+      const fix = cleanAccounts(asMoney(doc.data));
+      if (fix.changed) {
+        const saved = await writeDoc(KEY, doc.rev, fix.data);
+        if (saved.ok) doc = { rev: saved.rev, data: fix.data };
+        console.log(`money clean-up: accounts ${fix.before} -> ${fix.after}, merged=${fix.merged}, unassigned=${fix.unassigned}, corrected=${fix.corrected.join(",") || "none"}, saved=${saved.ok}`);
+      }
+      console.log(`money accounts: ${accountDiag(doc.data)}`);
+    }
     return packed({ configured: true, rev: doc?.rev ?? 0, data: doc?.data ?? null });
   } catch (e) {
     return failed(e);

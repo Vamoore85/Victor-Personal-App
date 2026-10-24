@@ -63,6 +63,7 @@ export function Overview({ data, onSettings }: { data: MoneyData; onSettings: ()
   const anyBalance = bal.some((b) => b.counted > 0);
   const txns = transactionRows(data, query);
   const hasBankTxns = data.transactions.some((t) => t.plaidId);
+  const unassigned = data.accounts.filter((a) => a.needsEntity && !(a.plaid && data.bankLinks.find((l) => l.id === a.plaid!.linkId)?.duplicateOf)).length;
 
   return (
     <div className="flex flex-col gap-5 lg:gap-6" data-testid="outlook">
@@ -114,6 +115,17 @@ export function Overview({ data, onSettings }: { data: MoneyData; onSettings: ()
           <p className="min-w-0 flex-1">{activity.problem?.text ?? f.text}</p>
           <button className="text-sm font-medium underline" onClick={() => void syncAll()} disabled={activity.syncing > 0}>
             {activity.syncing > 0 ? "Retrying…" : "Try again"}
+          </button>
+        </div>
+      )}
+
+      {unassigned > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm" data-testid="needs-assignment">
+          <p className="min-w-0 flex-1">
+            {unassigned} account{unassigned === 1 ? " has" : "s have"} no company yet, so {unassigned === 1 ? "it isn't" : "they aren't"} counted below.
+          </p>
+          <button className="rounded-full bg-brand px-4 py-1.5 text-sm font-medium text-on-brand" onClick={onSettings}>
+            Assign accounts
           </button>
         </div>
       )}
@@ -236,7 +248,7 @@ function EntityPanel({
         {needsConnection && (
           <div className="mt-2 flex flex-col gap-1" data-testid={`reconnect-${b.entity}`}>
             <button className="self-start rounded-full bg-brand px-4 py-1.5 text-sm font-medium text-on-brand disabled:opacity-60" onClick={() => void reconnect()} disabled={connecting}>
-              {connecting ? "Connecting…" : `${lost ? "Reconnect" : "Connect"} ${entityLabel(b.entity)}'s bank`}
+              {connecting ? "Connecting…" : lost ? "Reconnect bank" : "Connect bank"}
             </button>
             {connectError && <p className="text-xs text-rose-600 dark:text-rose-400">{connectError}</p>}
           </div>

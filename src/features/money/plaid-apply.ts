@@ -74,8 +74,14 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
   const idFor = new Map<string, string>(); // Plaid account id -> our account id
   const liveLinks = new Set(d.bankLinks.map((l) => l.id));
   const adopted = new Set<string>(); // our accounts that just took over this bank account
+  const viaAlias = new Set<string>(); // Plaid accounts that are a second route to an account we already feed
   for (const pa of r.accounts) {
     let acct = accounts.find((a) => a.plaid?.linkId === link.id && a.plaid.accountId === pa.id);
+    if (!acct) {
+      // Reached through another connection to the same bank: feed the one record.
+      acct = accounts.find((a) => a.plaidAliases?.some((p) => p.linkId === link.id && p.accountId === pa.id));
+      if (acct) viaAlias.add(pa.id);
+    }
     if (!acct && pa.mask) {
       // The same bank account already here: typed in or filled from statements, or
       // from a bank connection that was removed. The bank feed takes it over so
@@ -95,7 +101,7 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
         name: pa.name,
         type: accountType(pa),
         openingBalance: 0,
-        scope: link.scope,
+        needsEntity: true, // you say which company it belongs to; the bank doesn't
         last4: pa.mask ?? undefined,
         plaid: { linkId: link.id, accountId: pa.id },
       };
@@ -114,6 +120,8 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
   for (const pt of changed.values()) {
     const accountId = idFor.get(pt.accountId);
     if (!accountId || pt.pending) continue;
+    // The same transaction already came in through the account's main connection.
+    if (viaAlias.has(pt.accountId) && !kept.has(pt.id) && existing.some((t) => t.accountId === accountId && t.date === pt.date && Math.abs(t.amount - Math.abs(pt.amount)) < 0.005)) continue;
     const acctScope = accounts.find((a) => a.id === accountId)?.scope ?? scope; // you may have moved the account since connecting
     const income = pt.amount < 0; // Plaid: positive is money leaving the account
     const prev =

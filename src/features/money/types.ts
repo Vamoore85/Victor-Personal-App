@@ -67,6 +67,14 @@ export type Account = {
   // The bank's own balance from the last sync. "available" is what can be
   // spent right now (Plaid leaves it empty for some accounts).
   bankBalance?: { current: number | null; available: number | null; asOf: string };
+  // Which company this account belongs to hasn't been chosen yet. Such an
+  // account is left out of every Personal / Maverick / Gladiator total until
+  // you assign it under Accounts. A bank never decides this on its own.
+  needsEntity?: boolean;
+  entitySetAt?: string; // when you (or a stated correction) assigned it
+  // The same bank account reached through another connection to the same
+  // bank. Its feed is folded into this account, never kept as a second copy.
+  plaidAliases?: { linkId: string; accountId: string }[];
 };
 
 export type Transaction = {
@@ -239,6 +247,9 @@ export type BankLink = {
   historyStatus?: string;
   connectedAt?: string; // ISO time the bank was connected
   scope?: Scope;
+  // Every account it reaches is already fed by this older connection to the
+  // same bank, so it isn't synced (syncing it would only make copies).
+  duplicateOf?: string;
 };
 
 // "Anything described like this goes in this category", learned when you
@@ -304,6 +315,7 @@ export type MoneyData = {
   taxDocs: TaxDoc[];
   recurring: RecurringFinding[];
   billScan?: BillScan;
+  accountRules?: number; // version of the account clean-up (dedupe, entity assignment) applied
   docImports: DocImport[];
   briefings: BriefingSnapshot[];
 };
