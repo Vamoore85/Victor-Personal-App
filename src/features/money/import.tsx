@@ -64,7 +64,7 @@ export function parseMoney(s: string): number | null {
   return negative ? -n : n;
 }
 
-type Mapping = {
+export type Mapping = {
   date: number;
   description: number;
   amount: number; // -1 when the statement uses separate debit/credit columns
@@ -115,11 +115,11 @@ function guessCategory(description: string, fromFile: string) {
   return CATEGORY_RULES.find(([re]) => re.test(description))?.[1] ?? "Other";
 }
 
-type Row = Omit<Transaction, "id" | "accountId">;
+export type Row = Omit<Transaction, "id" | "accountId">;
 
 const TRANSFER_RE = /payment.*thank you|autopay|auto pay|online payment|card payment|pymt|transfer (to|from)|online transfer|zelle to self/i;
 
-function buildRows(
+export function buildRows(
   rows: string[][],
   map: Mapping,
   positiveIsSpending: boolean,

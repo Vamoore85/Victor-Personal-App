@@ -39,6 +39,7 @@ function normalize(value: unknown): MoneyData {
     taxDocs: Array.isArray(v.taxDocs) ? v.taxDocs : [],
     recurring: Array.isArray(v.recurring) ? v.recurring : [],
     billScan: v.billScan && typeof v.billScan === "object" ? v.billScan : undefined,
+    docImports: Array.isArray(v.docImports) ? v.docImports : [],
   };
 }
 

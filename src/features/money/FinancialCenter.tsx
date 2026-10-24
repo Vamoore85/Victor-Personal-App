@@ -9,6 +9,7 @@ import { categoriesInUse, today } from "./calc";
 import { Accounts, Budgets, Overview, Transactions } from "./sections";
 import { Bills } from "./bill-intel-ui";
 import { Spending } from "./spending-ui";
+import { Documents } from "./documents-ui";
 import { Institutions } from "./institutions";
 import { VaultAutoLock } from "./vault-ui";
 import { BankLinks, useAutoSync } from "./plaid";
@@ -30,6 +31,7 @@ const TABS = [
   { id: "budgets", label: "Budgets" },
   { id: "books", label: "Company books" },
   { id: "receipts", label: "Receipts" },
+  { id: "documents", label: "Documents" },
   { id: "taxes", label: "Taxes" },
   { id: "institutions", label: "Maverick Vault" },
 ];
@@ -204,6 +206,7 @@ export function FinancialCenter() {
       {tab === "budgets" && <Budgets data={shown} categories={categories} />}
       {tab === "institutions" && <Institutions data={shown} />}
       {tab === "receipts" && <Receipts data={shown} />}
+      {tab === "documents" && <Documents data={data} goTo={setTab} />}
       {tab === "taxes" && <Taxes data={shown} />}
       {tab === "books" && (
         <Books

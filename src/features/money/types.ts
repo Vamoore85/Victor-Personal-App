@@ -82,6 +82,27 @@ export type Transaction = {
   transferId?: string;
   plaidId?: string; // Plaid's id for transactions that came from a connected bank
   categoryLocked?: boolean; // you picked this category by hand; rules and syncs leave it alone
+  docId?: string; // came from an uploaded document (see DocImport)
+};
+
+// An uploaded statement or export, and what came of it. The file itself isn't
+// kept; only the transactions you chose to import, each pointing back here.
+export type DocImport = {
+  id: string;
+  name: string;
+  format: "csv" | "ofx" | "pdf" | "image" | "other";
+  size: number;
+  addedAt: string;
+  status: "imported" | "needs-review" | "unreadable";
+  note?: string;
+  accountId?: string;
+  first?: string; // earliest and latest dates in the file
+  last?: string;
+  rows: number; // rows read from the file
+  imported: number;
+  duplicates: number; // already here (bank feed or an earlier import), skipped
+  maybe: number; // possible duplicates you chose not to import
+  origin?: string; // where it came from, e.g. "Invest: Retirement goal" when added from another part of the app
 };
 
 export type Budget = {
@@ -282,6 +303,7 @@ export type MoneyData = {
   taxDocs: TaxDoc[];
   recurring: RecurringFinding[];
   billScan?: BillScan;
+  docImports: DocImport[];
 };
 
 export const EMPTY_DATA: MoneyData = {
@@ -296,4 +318,5 @@ export const EMPTY_DATA: MoneyData = {
   receipts: [],
   taxDocs: [],
   recurring: [],
+  docImports: [],
 };
