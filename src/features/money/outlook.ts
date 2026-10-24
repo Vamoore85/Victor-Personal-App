@@ -25,6 +25,9 @@ export type EntityBalance = {
   available: number; // from bank balances synced in the last day
   counted: number; // accounts that gave a current bank balance
   stale: number; // checking/savings accounts without a current bank balance (not counted)
+  accounts: { name: string; last4?: string; amount: number | null }[]; // each checking/savings account, by its bank name
+  cards: { name: string; last4?: string; owed: number | null; credit: number | null }[]; // credit cards and loans: money owed, not cash
+  owed: number; // total owed on current card and loan balances
   asOf: string | null;
 };
 
@@ -35,9 +38,19 @@ export function balances(d: MoneyData, now = Date.now()): EntityBalance[] {
     let counted = 0;
     let stale = 0;
     let asOf: string | null = null;
+    const accounts: EntityBalance["accounts"] = [];
+    const cards: EntityBalance["cards"] = [];
+    let owed = 0;
+    for (const a of d.accounts.filter((x) => (x.type === "credit" || x.type === "loan") && entityOf(x) === id)) {
+      const bb = a.bankBalance;
+      const fresh = bb && now - new Date(bb.asOf).getTime() <= FRESH_HOURS * 3600_000;
+      cards.push({ name: a.name, last4: a.last4, owed: fresh ? (bb.current ?? 0) : null, credit: fresh ? (bb.available ?? null) : null });
+      if (fresh) owed += bb.current ?? 0;
+    }
     for (const a of d.accounts.filter((x) => isCash(x) && entityOf(x) === id)) {
       const bb = a.bankBalance;
       const fresh = bb && now - new Date(bb.asOf).getTime() <= FRESH_HOURS * 3600_000;
+      accounts.push({ name: a.name, last4: a.last4, amount: fresh ? (bb.available ?? bb.current ?? 0) : null });
       if (!fresh) {
         stale++;
         continue;
@@ -46,7 +59,7 @@ export function balances(d: MoneyData, now = Date.now()): EntityBalance[] {
       counted++;
       if (!asOf || bb.asOf > asOf) asOf = bb.asOf;
     }
-    return { entity: id, available: Math.round(available * 100) / 100, counted, stale, asOf };
+    return { entity: id, available: Math.round(available * 100) / 100, counted, stale, accounts, cards, owed: Math.round(owed * 100) / 100, asOf };
   });
 }
 
