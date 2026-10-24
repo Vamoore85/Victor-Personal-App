@@ -1,3 +1,4 @@
+import { isCandidate, merchantKey } from "@/features/money/bill-intel";
 import { readDoc, writeDoc } from "@/lib/db";
 import { EMPTY_DATA, type MoneyData } from "@/features/money/types";
 
@@ -39,4 +40,46 @@ export function accountDiag(data: unknown) {
       return `${a.last4 ?? "----"}/${a.needsEntity ? "UNASSIGNED" : (a.scope ?? "personal")}${a.nickname ? `(${a.nickname})` : ""}/${a.type}/feed=${!a.plaid ? "none" : link ? "live" : "removed"}/bal=${bal}/tx=${bank}+${other}`;
     })
     .join(" ") + ` rules=${d.accountRules ?? 0} links=${d.bankLinks.length} dupLinks=${d.bankLinks.filter((l) => l.duplicateOf).length}`;
+}
+
+/**
+ * Why a bill you expect isn't in the bills list: for a few kinds of payment,
+ * how many transactions match, on which accounts, up to when, how many the
+ * bill finder looks at, and what it found. Counts, dates and names only.
+ */
+const LOOK_FOR: [string, RegExp][] = [
+  ["child-support", /CHILD|SUPPORT|CSEA|\bDHS\b|\bCSE\b|FAMILY SUPPORT/i],
+  ["verizon", /VERIZON|\bVZW\b/i],
+  ["bge", /\bBGE\b|BG ?& ?E|BALTIMORE GAS/i],
+  ["gas", /\bGAS\b|SHELL|EXXON|\bBP\b|SUNOCO|WAWA|ROYAL FARMS|CITGO|MOBIL|SPEEDWAY|SHEETZ/i],
+  ["card-payment", /CRD PMT|CARD ?PAYMENT|CREDIT CARD|CC PMT|E-?PAYMENT|AUTOPAY|AUTO PAY|CAPITAL ONE|DISCOVER|AMEX|AMERICAN EXPRESS|CHASE|CITI|SYNCHRONY|BARCLAY/i],
+  ["checks", /^CHECK|CHECK ?#|CHECK NUMBER|\bCHK\b/i],
+];
+export function billDiag(data: unknown) {
+  const d = asMoney(data);
+  const acct = new Map(d.accounts.map((a) => [a.id, a]));
+  const out: string[] = [];
+  for (const [name, re] of LOOK_FOR) {
+    const ts = d.transactions.filter((t) => t.kind === "expense" && re.test(t.description));
+    if (!ts.length) {
+      out.push(`${name}: none`);
+      continue;
+    }
+    const cand = ts.filter((t) => isCandidate(t, "out")).length;
+    const byAcct = new Map<string, number>();
+    for (const t of ts) {
+      const a = acct.get(t.accountId);
+      const k = `${a?.last4 ?? "?"}${a?.needsEntity ? "(unassigned)" : ""}`;
+      byAcct.set(k, (byAcct.get(k) ?? 0) + 1);
+    }
+    const last = ts.reduce((m, t) => (t.date > m ? t.date : m), "");
+    const cats = [...new Set(ts.map((t) => t.category))].slice(0, 4).join("|");
+    const keys = [...new Set(ts.map((t) => merchantKey(t.description)))].slice(0, 4).join("|");
+    const finds = d.recurring
+      .filter((f) => f.direction === "out" && keys.split("|").some((k) => k && f.key.includes(`|${k}|`)))
+      .map((f) => `${f.cadence}/${f.confidence}/${f.status}/next=${f.nextExpected ?? "none"}`)
+      .join(",");
+    out.push(`${name}: n=${ts.length} candidates=${cand} accts=${[...byAcct].map(([k, v]) => `${k}:${v}`).join(",")} last=${last} cats=${cats} keys=${keys} findings=${finds || "none"}`);
+  }
+  return out.join(" || ") + ` | scan=${d.billScan ? `${d.billScan.found}@${d.billScan.windowEnd}/rules${d.billScan.rules}` : "none"} recurring=${d.recurring.length}`;
 }

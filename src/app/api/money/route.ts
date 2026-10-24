@@ -2,7 +2,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import { connection } from "next/server";
 import { databaseUrl, dbConfigured, readDoc, writeDoc } from "@/lib/db";
 import { applyPendingImport } from "@/lib/pending-import";
-import { accountDiag, asMoney } from "@/lib/money-doc";
+import { accountDiag, asMoney, billDiag } from "@/lib/money-doc";
 import { ACCOUNT_RULES, cleanAccounts } from "@/features/money/accounts-fix";
 import { sameOrigin, signedIn } from "@/lib/plaid-server";
 
@@ -70,6 +70,7 @@ export async function GET(req: Request) {
         console.log(`money clean-up: accounts ${fix.before} -> ${fix.after}, merged=${fix.merged}, unassigned=${fix.unassigned}, corrected=${fix.corrected.join(",") || "none"}, saved=${saved.ok}`);
       }
       console.log(`money accounts: ${accountDiag(doc.data)}`);
+      console.log(`money bills check: ${billDiag(doc.data)}`);
     }
     return packed({ configured: true, rev: doc?.rev ?? 0, data: doc?.data ?? null });
   } catch (e) {
