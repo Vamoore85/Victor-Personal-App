@@ -122,6 +122,19 @@ export async function connectBank(scope: Scope): Promise<string> {
   return id;
 }
 
+/**
+ * Opens an existing bank connection so you can tick accounts that weren't
+ * shared when it was connected. No new connection is made, so nothing is
+ * copied; the newly shared accounts then sync into the records already here
+ * (matched by last 4 digits), keeping their company and history.
+ */
+export async function addAccountsToBank(link: BankLink): Promise<boolean> {
+  const { linkToken } = await api<{ linkToken: string }>("link-token", { link: link.link, addAccounts: true });
+  if (!(await openLink(linkToken))) return false;
+  await syncLink({ ...link, error: undefined });
+  return true;
+}
+
 /* ---------------- Syncing ---------------- */
 
 // One sync per bank at a time: a second request while one is running waits for it.

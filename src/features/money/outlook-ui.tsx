@@ -5,9 +5,9 @@ import { applyScan, detectRecurring, SCAN_RULES } from "./bill-intel";
 import { addDays, money, today } from "./calc";
 import { ago } from "./intel-shared";
 import { CONFIDENCE_LABEL, ENTITIES, balances, type AccountLine, cadenceWord, entityLabel, total, transactionRows, upcoming, type Confidence, type EntityBalance, type TxnRow, type UpcomingLine } from "./outlook";
-import { connectBank, syncAll, useSyncActivity } from "./plaid";
+import { addAccountsToBank, connectBank, syncAll, useSyncActivity } from "./plaid";
 import { freshness } from "./briefing";
-import { newId, setMoneyData } from "./store";
+import { getMoneyData, newId, setMoneyData } from "./store";
 import type { MoneyData } from "./types";
 
 /*
@@ -224,7 +224,11 @@ function EntityPanel({
     setConnectError("");
     setConnecting(true);
     try {
-      await connectBank(b.entity);
+      // Add the missing account to the bank connection you already have; only connect anew if there is none.
+      const d = getMoneyData();
+      const live = d?.bankLinks.find((l) => !l.duplicateOf && !l.errorCode);
+      if (live) await addAccountsToBank(live);
+      else await connectBank(b.entity);
     } catch (e) {
       setConnectError((e as Error).message);
     } finally {
