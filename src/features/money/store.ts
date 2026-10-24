@@ -197,6 +197,14 @@ async function push() {
   }
 }
 
+/** The current money data outside React (null before the browser is ready). */
+export function getMoneyData(): MoneyData | null {
+  return typeof window === "undefined" ? null : read();
+}
+
+/** Changes made here that the database hasn't got yet; a reload now would lose them. */
+export const hasUnsavedChanges = () => dirty || pushing;
+
 /** Why saving online failed, when the server said. */
 export const cloudErrorMessage = () => cloudError;
 

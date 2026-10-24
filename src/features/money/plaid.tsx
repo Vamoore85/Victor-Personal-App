@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { setMoneyData, newId } from "./store";
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { getMoneyData, setMoneyData, newId, useCloudState } from "./store";
 import { useDefaultScope, ScopeBadge, SCOPES } from "./scope";
 import { isCompany, type Scope, type Account, type AccountType, type BankLink, type MoneyData, type Transaction } from "./types";
 import { isLiability } from "./calc";
@@ -266,19 +266,56 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
   };
 }
 
-const latestCursor: Record<string, string> = {};
+/* ---------------- Syncing ---------------- */
+
+// One sync per bank at a time: a second request while one is running waits for it.
+const running = new Map<string, Promise<string | undefined>>();
+const syncListeners = new Set<() => void>();
+let lastRun: { at: string; ok: number; failed: number } | null = null;
+const notify = () => syncListeners.forEach((l) => l());
+
+/** How many banks are syncing right now, and how the last sync went, for the screens. */
+export function useSyncActivity() {
+  const count = useSyncExternalStore(
+    (l) => {
+      syncListeners.add(l);
+      return () => syncListeners.delete(l);
+    },
+    () => running.size,
+    () => 0,
+  );
+  return { syncing: count, lastRun };
+}
+
+/** Errors that need you (sign in again, reconnect); syncing again on its own won't fix them. */
+export const needsYou = (l: BankLink) =>
+  l.errorCode === "BAD_SEAL" || l.errorCode === "ITEM_LOGIN_REQUIRED" || l.errorCode === "PENDING_EXPIRATION" || l.errorCode === "PENDING_DISCONNECT";
 
 /**
  * Brings a bank up to date. A big first sync comes in several calls; each one
- * is saved as it arrives. Returns Plaid's history status.
+ * is saved as it arrives. Always starts from the latest saved cursor, so a
+ * sync started from an older copy of the data doesn't fetch twice. Returns
+ * Plaid's history status, or undefined when the sync failed.
  */
-async function syncLink(link: BankLink, trigger: "first-sync" | "sync" = "sync"): Promise<string | undefined> {
-  let cursor = link.cursor;
+export function syncLink(link: BankLink, trigger: "first-sync" | "sync" = "sync"): Promise<string | undefined> {
+  const already = running.get(link.id);
+  if (already) return already;
+  const job = runSync(link, trigger).finally(() => {
+    running.delete(link.id);
+    notify();
+  });
+  running.set(link.id, job);
+  notify();
+  return job;
+}
+
+async function runSync(link: BankLink, trigger: "first-sync" | "sync"): Promise<string | undefined> {
+  const fresh = () => getMoneyData()?.bankLinks.find((l) => l.id === link.id) ?? link;
+  let cursor = fresh().cursor;
   try {
     for (let round = 0; round < 12; round++) {
       const r = await api<SyncResult>("sync", { link: link.link, cursor });
       cursor = r.cursor;
-      latestCursor[link.id] = r.cursor;
       setMoneyData((d) => {
         const current = d.bankLinks.find((l) => l.id === link.id);
         return current ? applySync(d, current, r) : d;
@@ -286,9 +323,12 @@ async function syncLink(link: BankLink, trigger: "first-sync" | "sync" = "sync")
       if (!r.hasMore) {
         // A finished sync refreshes the saved Financial Briefing.
         setMoneyData((d) => saveBriefing(d, trigger));
-        return r.updateStatus;
+        return r.updateStatus || "OK";
       }
     }
+    // Still more after 12 calls (a very large history): what arrived is saved; the next sync continues.
+    setMoneyData((d) => saveBriefing(d, trigger));
+    return "MORE";
   } catch (e) {
     const err = e as Error & { code?: string };
     // The saved briefing records the failure too, so it never reads as current.
@@ -297,14 +337,23 @@ async function syncLink(link: BankLink, trigger: "first-sync" | "sync" = "sync")
   return undefined;
 }
 
+/** Syncs every connected bank that can sync without you. Resolves when all are done. */
+export async function syncAll(trigger: "first-sync" | "sync" = "sync") {
+  const links = (getMoneyData()?.bankLinks ?? []).filter((l) => !needsYou(l));
+  const results = await Promise.all(links.map((l) => syncLink(l, trigger)));
+  const ok = results.filter((r) => r !== undefined).length;
+  lastRun = { at: new Date().toISOString(), ok, failed: links.length - ok };
+  notify();
+  return lastRun;
+}
+
 /** Right after connecting, Plaid needs a little while to gather history. Check back a few times. */
 async function firstSync(link: BankLink, onWait: (n: number) => void) {
   let status = await syncLink(link, "first-sync");
-  for (let i = 0; i < 8 && (status === "NOT_READY" || status === undefined || status === ""); i++) {
+  for (let i = 0; i < 8 && (status === "NOT_READY" || status === undefined); i++) {
     onWait(i + 1);
     await new Promise((res) => setTimeout(res, 5000));
-    const current = { ...link, cursor: latestCursor[link.id] ?? link.cursor };
-    status = await syncLink(current, "first-sync");
+    status = await syncLink(link, "first-sync");
   }
   return status;
 }
@@ -319,17 +368,43 @@ function timeAgo(iso?: string) {
   return `Synced ${new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 }
 
-/** Keeps connected banks fresh: syncs any that are stale when the Financial Center opens. */
+const RETRY_MS = 10 * 60 * 1000; // banks still loading history, or whose last sync failed
+
+/**
+ * Keeps connected banks fresh in this browser: when the Financial Center
+ * opens (and when it comes back into view), syncs every bank that's due.
+ * Waits for the online copy of your money data first, so a device whose own
+ * copy is old or empty still finds and syncs the banks connected elsewhere.
+ */
 export function useAutoSync(data: MoneyData | null) {
-  const started = useRef(false);
+  const cloud = useCloudState();
+  const ready = !!data && cloud !== "loading";
+  const linkIds = data?.bankLinks.map((l) => l.id).join(",") ?? "";
+  const tried = useRef(new Set<string>());
   useEffect(() => {
-    if (!data || started.current) return;
-    started.current = true;
-    const age = (l: BankLink) => (l.lastSync ? Date.now() - new Date(l.lastSync).getTime() : Infinity);
-    // Banks still loading their history are checked again sooner.
-    const stale = data.bankLinks.filter((l) => !l.error && age(l) > (l.historyStatus === HISTORY_DONE ? STALE_MS : 10 * 60 * 1000));
-    stale.forEach((l) => void syncLink(l));
-  }, [data]);
+    if (!ready) return;
+    const check = () => {
+      const d = getMoneyData();
+      if (!d) return;
+      const age = (l: BankLink) => (l.lastSync ? Date.now() - new Date(l.lastSync).getTime() : Infinity);
+      const due = d.bankLinks.filter((l) => {
+        if (needsYou(l)) return false;
+        // A failed bank is retried once each time the page opens, not in a loop.
+        if (l.error) return !tried.current.has(l.id);
+        return age(l) > (l.historyStatus === HISTORY_DONE ? STALE_MS : RETRY_MS);
+      });
+      due.forEach((l) => tried.current.add(l.id));
+      if (due.length) due.forEach((l) => void syncLink(l));
+    };
+    check();
+    const onVisible = () => document.visibilityState === "visible" && check();
+    document.addEventListener("visibilitychange", onVisible);
+    const timer = setInterval(check, RETRY_MS);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      clearInterval(timer);
+    };
+  }, [ready, linkIds]);
 }
 
 export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: () => void }) {
@@ -402,7 +477,10 @@ export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: 
       setMoneyData((d) => ({ ...d, bankLinks: [...d.bankLinks, bank] }));
       setBusy(bank.id);
       const st = await firstSync(bank, (n) => setWaiting(`Plaid is gathering your history (check ${n} of 8)…`));
-      setBriefingReady(!!st && st !== "NOT_READY");
+      const ready = !!st && st !== "NOT_READY";
+      setBriefingReady(ready);
+      // Transactions are in: go straight to the briefing.
+      if (ready && onBriefing) onBriefing();
       setWaiting(
         st === HISTORY_DONE
           ? ""
@@ -419,8 +497,19 @@ export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: 
     setMessage("");
     setBusy(link.id);
     const st = await syncLink(link);
-    if (st && st !== HISTORY_DONE) setWaiting(`${link.institution || "The bank"}: Plaid is still loading older history.`);
     setBusy(null);
+    if (st === undefined) return; // the bank's line shows what went wrong
+    if (st !== HISTORY_DONE && st !== "OK") setWaiting(`${link.institution || "The bank"}: Plaid is still loading older history.`);
+    onBriefing?.();
+  }
+
+  async function syncEvery() {
+    setMessage("");
+    setBusy("all");
+    const r = await syncAll();
+    setBusy(null);
+    if (r.ok > 0 && onBriefing) onBriefing();
+    else if (r.failed) setMessage("The sync didn't finish. Each bank below says why.");
   }
 
   /** Re-opens Plaid for a bank that needs you to sign in again. */
@@ -429,7 +518,10 @@ export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: 
     setBusy(link.id);
     try {
       const { linkToken } = await api<{ linkToken: string }>("link-token", { link: link.link });
-      if (await openLink(linkToken)) await syncLink({ ...link, error: undefined });
+      if (await openLink(linkToken)) {
+        const st = await syncLink({ ...link, error: undefined });
+        if (st !== undefined) onBriefing?.();
+      }
     } catch (e) {
       setMessage((e as Error).message);
     } finally {
@@ -459,6 +551,9 @@ export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: 
   }
 
   const notReady = status && !status.configured;
+  const { syncing } = useSyncActivity();
+  const cloud = useCloudState();
+  const online = cloud === "saved" || cloud === "saving";
   const check = server?.check;
   return (
     <Card title="Connected banks">
@@ -526,6 +621,27 @@ export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: 
           </button>
         </div>
       )}
+      {data.bankLinks.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-800" data-testid="sync-bar">
+          <p className="min-w-0 flex-1 text-xs text-zinc-500">
+            {syncing > 0 ? (
+              <span className="text-amber-700 dark:text-amber-400">Syncing {syncing} bank{syncing === 1 ? "" : "s"} now…</span>
+            ) : (
+              "Banks sync on their own when you open Money in this browser."
+            )}{" "}
+            <span data-testid="link-storage">
+              {online
+                ? "These connections are saved online, so any device you sign in on can sync them."
+                : cloud === "loading"
+                  ? ""
+                  : "Online saving isn't working right now, so these connections are saved in this browser only. This browser can still sync them."}
+            </span>
+          </p>
+          <button className={buttonClass} onClick={syncEvery} disabled={busy !== null || syncing > 0}>
+            {busy === "all" || syncing > 0 ? "Syncing…" : "Sync all now"}
+          </button>
+        </div>
+      )}
       {data.bankLinks.length === 0 ? (
         <Empty>Connect your bank and card accounts to bring in balances and transactions automatically. You sign in to your bank inside Plaid&apos;s own window; Maverick never sees your bank password.</Empty>
       ) : (
@@ -546,8 +662,8 @@ export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: 
                       Sign in again
                     </button>
                   )}
-                  <button className={ghostButtonClass} onClick={() => sync(l)} disabled={busy !== null || !status?.configured}>
-                    {busy === l.id ? "Syncing…" : "Sync now"}
+                  <button className={ghostButtonClass} onClick={() => sync(l)} disabled={busy !== null || running.has(l.id)}>
+                    {busy === l.id || running.has(l.id) ? "Syncing…" : "Sync now"}
                   </button>
                   <button className="text-xs text-zinc-400 hover:text-rose-600" onClick={() => disconnect(l)} disabled={busy !== null}>
                     Disconnect

@@ -8,6 +8,8 @@ import { buildBriefing, briefingPlainText, saveBriefing, FRESHNESS_LABEL, type B
 import { Card, Empty, ghostButtonClass } from "./ui";
 import { RealEmpty, SampleBanner, Tag, ago, useWorkspace } from "./intel-shared";
 import type { MoneyData } from "./types";
+import { syncAll, useSyncActivity } from "./plaid";
+import { setMoneyData } from "./store";
 
 /*
  * The Briefing tab: what Money opens to once a bank is connected. Built fresh
@@ -17,8 +19,16 @@ import type { MoneyData } from "./types";
 const TONE: Record<Freshness, "good" | "warn" | "bad" | undefined> = { current: "good", partial: "warn", stale: "warn", failed: "bad", "no-bank": undefined };
 
 export function BriefingView({ data, goTo }: { data: MoneyData; goTo: (tab: string) => void }) {
-  const { mode, ws, update, readiness } = useWorkspace(data);
+  const workspace = useWorkspace(data);
+  const { readiness } = workspace;
+  // Once a bank has synced, the briefing is always about your real data, even if Bills was left on the Sample.
+  const banked = data.bankLinks.some((l) => l.lastSync);
+  const mode = banked ? "real" : workspace.mode;
+  const ws = banked ? data : workspace.ws;
+  const update = banked ? setMoneyData : workspace.update;
+  const { syncing } = useSyncActivity();
   const [copied, setCopied] = useState(false);
+  const [syncNote, setSyncNote] = useState("");
   if (!ws) return <Empty>Loading…</Empty>;
   const b = buildBriefing(ws);
   const text = briefingPlainText(b);
@@ -57,6 +67,13 @@ export function BriefingView({ data, goTo }: { data: MoneyData; goTo: (tab: stri
             {b.freshnessText}
             {b.lastSync && ` Last bank sync ${ago(b.lastSync)}.`}
           </p>
+          {syncing > 0 && <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="briefing-syncing">Syncing {syncing} bank{syncing === 1 ? "" : "s"} now; this updates when it finishes.</p>}
+          {syncNote && (
+            <p className="text-xs text-rose-600 dark:text-rose-400">
+              {syncNote}{" "}
+              <button className="underline" onClick={() => goTo("accounts")}>Open Accounts</button>
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -71,7 +88,17 @@ export function BriefingView({ data, goTo }: { data: MoneyData; goTo: (tab: stri
           <button className={ghostButtonClass} onClick={print}>Print</button>
           <button className={ghostButtonClass} onClick={download}>Download</button>
           {mode === "real" && data.bankLinks.length > 0 && (
-            <button className={ghostButtonClass} onClick={() => goTo("accounts")}>Sync banks</button>
+            <button
+              className={ghostButtonClass}
+              disabled={syncing > 0}
+              onClick={async () => {
+                setSyncNote("");
+                const r = await syncAll();
+                setSyncNote(r.failed ? `${r.failed} bank${r.failed === 1 ? "" : "s"} didn't sync. Accounts shows why.` : "");
+              }}
+            >
+              {syncing > 0 ? "Syncing…" : "Sync now"}
+            </button>
           )}
         </div>
       </div>

@@ -7,6 +7,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { APP_NAME, AREA_GROUPS, LIFE_AREAS } from "@/config/app";
 import { Icon } from "./icons";
 import { SignOut } from "./SignOut";
+import { FreshBuild } from "./FreshBuild";
 
 /*
  * The app frame around every signed-in screen.
@@ -129,6 +130,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-dvh flex-col lg:pl-64">
+      <FreshBuild />
       {/* Desktop: persistent left navigation */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col gap-4 overflow-y-auto border-r border-zinc-200 bg-surface px-3 py-4 lg:flex dark:border-zinc-800">
         <Link href="/" className="flex items-center gap-2.5 px-1.5">

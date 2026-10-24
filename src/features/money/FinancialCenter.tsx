@@ -14,6 +14,7 @@ import { BriefingView } from "./briefing-ui";
 import { Institutions } from "./institutions";
 import { VaultAutoLock } from "./vault-ui";
 import { BankLinks, useAutoSync } from "./plaid";
+import { setMode } from "./intel-shared";
 import { ghostButtonClass } from "./ui";
 import { Books } from "./books-ui";
 import { BUSINESS_CATEGORY_NAMES } from "./books";
@@ -201,7 +202,14 @@ export function FinancialCenter() {
       {tab === "briefing" && <BriefingView data={data} goTo={setTab} />}
       {tab === "accounts" && (
         <>
-          <BankLinks data={shown} onBriefing={() => setTab("briefing")} />
+          {/* Every bank is listed here whatever the switch says, so each one can always be synced. */}
+          <BankLinks
+            data={data}
+            onBriefing={() => {
+              setMode("real");
+              setTab("briefing");
+            }}
+          />
           <Accounts data={shown} />
         </>
       )}
