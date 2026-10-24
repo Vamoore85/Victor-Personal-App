@@ -32,11 +32,11 @@ function isActive(pathname: string, href: string) {
 export function Avatar({ size = 28 }: { size?: number }) {
   return (
     <Image
-      src="/maverick-black-beauty.webp"
-      alt=""
-      width={size}
-      height={size}
-      className="shrink-0 rounded-full object-cover object-[50%_25%]"
+      src="/brand/maverick-black-horse-mark.png"
+      alt="Maverick"
+      width={size * 2}
+      height={size * 2}
+      className="shrink-0 rounded-full bg-white object-contain ring-1 ring-zinc-200 dark:ring-zinc-700"
       style={{ width: size, height: size }}
     />
   );

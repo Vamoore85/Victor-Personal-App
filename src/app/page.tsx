@@ -34,12 +34,12 @@ export default function Home() {
       <div className="flex min-w-0 flex-col gap-4 lg:gap-5">
         <header className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-surface p-3 sm:p-4 dark:border-zinc-800">
           <Image
-            src="/maverick-black-beauty.webp"
-            alt="Maverick, a black horse at sunset"
-            width={56}
-            height={56}
+            src="/brand/maverick-black-horse-logo.png"
+            alt="Maverick logo, a black horse"
+            width={112}
+            height={112}
             priority
-            className="h-12 w-12 shrink-0 rounded-full object-cover object-[50%_25%] sm:h-14 sm:w-14"
+            className="h-12 w-12 shrink-0 rounded-full bg-white object-contain ring-1 ring-zinc-200 sm:h-14 sm:w-14 dark:ring-zinc-700"
           />
           <div className="min-w-0">
             <Greeting />
