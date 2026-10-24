@@ -91,29 +91,41 @@ test("each real bank account is kept once and cash counts it once", () => {
 test("no account is put under Maverick by default; only clear choices and the owner's correction stand", () => {
   const { data } = cleanAccounts(production());
   const by = (id: string) => data.accounts.find((a) => a.id === id)!;
-  // ··5443 is Gladiator by the owner's word: assigned by its record id, history moves with it.
-  assert.equal(by("a5443").scope, "gladiator");
+  // ··5443 is Maverick by the owner's word (his own, replacing an earlier relayed "Gladiator").
+  assert.equal(by("a5443").scope, "business");
   assert.equal(by("a5443").needsEntity, undefined);
   // Moved away from what their connection defaulted to: a clear choice, kept.
   assert.equal(by("g5105").scope, "gladiator");
   assert.equal(by("g5815").scope, "gladiator");
-  // Same as the connection's default, or no connection: not a choice, so needs assignment.
-  assert.equal(by("p5249").needsEntity, true);
+  // ··5249 is Personal by the owner's word.
+  assert.equal(by("p5249").scope, "personal");
+  assert.equal(by("p5249").needsEntity, undefined);
+  // No connection and no word from the owner: needs assignment.
   assert.equal(by("a5668").needsEntity, true);
   assert.equal(by("a6846").needsEntity, true);
+  // Maverick holds only ··5443, which has no live balance: nothing counted as cash.
   const maverick = balances(data).find((b) => b.entity === "business")!;
-  assert.equal(maverick.accounts.length + maverick.cards.length, 0);
+  assert.deepEqual(maverick.accounts.map((a) => a.last4), ["5443"]);
   assert.equal(maverick.available, 0);
   assert.equal(maverick.counted, 0);
 });
 
-test("··5443 shows under Gladiator as missing a live balance, never as cash", () => {
+test("··5443 shows under Maverick as missing a live balance, never as cash", () => {
   const { data } = cleanAccounts(production());
-  const gladiator = balances(data).find((b) => b.entity === "gladiator")!;
-  const row = gladiator.accounts.find((a) => a.last4 === "5443")!;
+  const maverick = balances(data).find((b) => b.entity === "business")!;
+  const row = maverick.accounts.find((a) => a.last4 === "5443")!;
   assert.equal(row.amount, null);
   assert.equal(row.state, "lost");
-  assert.equal(gladiator.available, 1200); // ··5105 + ··5815 only
+  assert.equal(balances(data).find((b) => b.entity === "gladiator")!.available, 1200); // ··5105 + ··5815 only
+  assert.equal(balances(data).find((b) => b.entity === "personal")!.available, 300); // ··5249 once
+});
+
+test("a database that already filed ··5443 under Gladiator moves it to Maverick", () => {
+  const v2 = cleanAccounts(production()).data;
+  const old = { ...v2, accountRules: 2, accounts: v2.accounts.map((a) => (a.id === "a5443" ? { ...a, scope: "gladiator" as const } : a)) };
+  const { data } = cleanAccounts(old);
+  assert.equal(data.accounts.find((a) => a.id === "a5443")!.scope, "business");
+  assert.equal(data.accountRules, 3);
 });
 
 test("the clean-up is safe to run again", () => {
@@ -152,7 +164,7 @@ test("··5105 is Gladiator Payroll and ··5815 is Gladiator Bills, kept apart,
   assert.equal(bills.nickname, "Gladiator Bills");
   assert.notEqual(pay.id, bills.id);
   const gl = balances(data).find((b) => b.entity === "gladiator")!;
-  assert.deepEqual(gl.accounts.map((a) => a.name).sort(), ["Account 5443", "Gladiator Bills", "Gladiator Payroll"]);
+  assert.deepEqual(gl.accounts.map((a) => a.name).sort(), ["Gladiator Bills", "Gladiator Payroll"]);
   assert.equal(gl.accounts.find((a) => a.name === "Gladiator Payroll")!.bankName, "Account 5105");
   // A sync from their own connection keeps the company and the name.
   const l0 = data.bankLinks.find((l) => l.id === "L0")!;
@@ -186,6 +198,6 @@ test("a database already on rules version 1 gets the version 2 names without red
   delete p.nickname;
   const { data } = cleanAccounts(v1);
   assert.equal(data.accounts.find((a) => a.id === "g5105")!.nickname, "Gladiator Payroll");
-  assert.equal(data.accounts.find((a) => a.id === "p5249")!.needsEntity, true);
-  assert.equal(data.accountRules, 2);
+  assert.equal(data.accounts.find((a) => a.id === "a5668")!.needsEntity, true);
+  assert.equal(data.accountRules, 3);
 });
