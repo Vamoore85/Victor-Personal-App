@@ -1,4 +1,4 @@
-import { databaseUrl, dbConfigured, readDoc } from "@/lib/db";
+import { databaseUrl, dbConfigured, isRetryable, readDoc } from "@/lib/db";
 import { asMoney, MONEY_DOC } from "@/lib/money-doc";
 import { envConfigured, envName, handle, plaid, PlaidError, siteCreds, unseal, type PlaidCreds } from "@/lib/plaid-server";
 
@@ -29,7 +29,10 @@ export const POST = handle(async (body) => {
       }
       out.database = { ok: true, host, rev: doc?.rev ?? 0, sizeKb: doc ? Math.round(JSON.stringify(doc.data).length / 1024) : 0 };
     } catch (e) {
-      out.database = { ok: false, code: "DB_UNREACHABLE", text: `The database didn't answer (${(e as { code?: string }).code ?? "error"}).` };
+      const code = (e as { code?: string }).code ?? "error";
+      out.database = isRetryable(e)
+        ? { ok: false, code: "DB_RETRY", retry: true, text: `The database was busy (${code}). Checking again…` }
+        : { ok: false, code: "DB_UNREACHABLE", text: `The database didn't answer (${code}).` };
     }
   }
 

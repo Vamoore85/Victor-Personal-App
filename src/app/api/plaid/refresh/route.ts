@@ -1,4 +1,4 @@
-import { dbConfigured, readDoc } from "@/lib/db";
+import { dbConfigured, isRetryable, readDoc } from "@/lib/db";
 import { asMoney, MONEY_DOC, updateMoney } from "@/lib/money-doc";
 import { credsFrom, handle, PlaidError, unseal } from "@/lib/plaid-server";
 import { pullChanges } from "@/lib/plaid-sync";
@@ -34,7 +34,7 @@ export const POST = handle(async (body) => {
   const creds = await credsFrom(body);
   const only = Array.isArray(body.only) ? new Set(body.only.map(String)) : null;
   const start = Date.now();
-  const doc = asMoney((await readDoc(MONEY_DOC))?.data);
+  const doc = asMoney((await readDoc(MONEY_DOC).catch(dbFailed))?.data);
   const links = doc.bankLinks.filter((l) => (only ? only.has(l.id) : !NEEDS_YOU.has(l.errorCode ?? "")));
 
   const pulled = new Map<string, SyncResult[]>();
@@ -79,7 +79,7 @@ export const POST = handle(async (body) => {
       if (!r.ok) next = { ...next, bankLinks: next.bankLinks.map((x): BankLink => (x.id === r.id ? { ...x, error: r.error, errorCode: r.code } : x)) };
     }
     return next;
-  });
+  }).catch(dbFailed);
 
   // Counts and codes only, for the hosting's logs.
   console.log(
@@ -87,3 +87,15 @@ export const POST = handle(async (body) => {
   );
   return { rev, links: report };
 });
+
+/**
+ * A database failure, named so the app knows whether to try again. Nothing is
+ * lost: the bank's place (cursor) only moves when the save succeeds, so the
+ * next try fetches the same transactions again.
+ */
+function dbFailed(e: unknown): never {
+  if (e instanceof PlaidError) throw e;
+  const code = (e as { code?: string })?.code ?? "";
+  if (isRetryable(e)) throw new PlaidError(`The database was busy and the save didn't go through (${code}).`, "DB_RETRY", 503);
+  throw new PlaidError(`The database didn't answer (${code || "error"}).`, "DB_ERROR", 503);
+}

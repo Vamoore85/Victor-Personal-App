@@ -126,9 +126,55 @@ alter table app_files enable row level security;
 
 const KEEP_VERSIONS = 300;
 
+// Postgres asks for a retry on these: deadlock, serialization failure, lock timeout.
+const RETRYABLE = new Set(["40P01", "40001", "55P03"]);
+
+export const isRetryable = (e: unknown) => RETRYABLE.has((e as { code?: string })?.code ?? "");
+
+/** Runs a database step again (up to 5 tries, backing off) when Postgres reports a deadlock or similar. */
+export async function withRetry<T>(step: () => Promise<T>, tries = 5): Promise<T> {
+  for (let i = 1; ; i++) {
+    try {
+      return await step();
+    } catch (e) {
+      if (!isRetryable(e) || i >= tries) throw e;
+      await new Promise((r) => setTimeout(r, 100 * 2 ** i + Math.random() * 100));
+    }
+  }
+}
+
+/*
+ * The tables are created once. Every new server instance used to run the
+ * whole SCHEMA as one transaction, and its ALTER TABLE / CREATE INDEX took
+ * table locks that deadlocked (40P01) with saves running on other instances.
+ * Now it first checks the catalog, which takes no table locks, and only runs
+ * the setup when something is missing, one instance at a time.
+ */
+async function ensureSchema(p: Pool) {
+  const { rows } = await p.query(`
+    select coalesce(bool_and(c.relrowsecurity), false) and count(*) = 3 as ok
+      from pg_class c
+     where c.oid in (to_regclass('public.app_docs'), to_regclass('public.app_doc_history'), to_regclass('public.app_files'))
+       and to_regclass('public.app_doc_history_key') is not null`);
+  if (rows[0]?.ok) return;
+  const client = await p.connect();
+  try {
+    await client.query("begin");
+    await client.query("select pg_advisory_xact_lock(hashtext('maverick-schema'))");
+    await client.query("set local lock_timeout = '10s'");
+    await client.query(SCHEMA);
+    await client.query("commit");
+  } catch (e) {
+    await client.query("rollback").catch(() => undefined);
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 async function db() {
   const p = await getPool();
-  ready ??= p.query(SCHEMA).then(
+  ready ??= withRetry(() => ensureSchema(p)).then(
     () => undefined,
     (e) => {
       ready = null; // try again on the next request
@@ -148,7 +194,8 @@ async function db() {
 export type Doc = { rev: number; data: unknown };
 
 export async function readDoc(key: string): Promise<Doc | null> {
-  const { rows } = await (await db()).query("select rev, data from app_docs where key = $1", [key]);
+  const p = await db();
+  const { rows } = await withRetry(() => p.query("select rev, data from app_docs where key = $1", [key]));
   return rows[0] ? { rev: rows[0].rev, data: rows[0].data } : null;
 }
 
@@ -157,7 +204,26 @@ export async function readDoc(key: string): Promise<Doc | null> {
  * revision, or the current document when someone else saved first.
  */
 export async function writeDoc(key: string, baseRev: number, data: unknown): Promise<{ ok: true; rev: number } | { ok: false; current: Doc }> {
-  const client = await (await db()).connect();
+  const p = await db();
+  // The whole save is one transaction, retried from the start on a deadlock: it
+  // always locks the document's row first, then writes history, so two saves queue
+  // instead of deadlocking. Nothing is half-saved; a failed try is rolled back.
+  return withRetry(async () => {
+    try {
+      return await writeOnce(p, key, baseRev, data);
+    } catch (e) {
+      // Two first-ever saves at once: the loser sees the winner's copy as a normal conflict.
+      if ((e as { code?: string }).code === "23505") {
+        const current = await readDoc(key);
+        if (current) return { ok: false as const, current };
+      }
+      throw e;
+    }
+  });
+}
+
+async function writeOnce(p: Pool, key: string, baseRev: number, data: unknown): Promise<{ ok: true; rev: number } | { ok: false; current: Doc }> {
+  const client = await p.connect();
   try {
     await client.query("begin");
     const { rows } = await client.query("select rev, data from app_docs where key = $1 for update", [key]);
@@ -169,8 +235,9 @@ export async function writeDoc(key: string, baseRev: number, data: unknown): Pro
     const rev = currentRev + 1;
     const json = JSON.stringify(data);
     await client.query(
-      `insert into app_docs (key, data, rev, updated_at) values ($1, $2::jsonb, $3, now())
-       on conflict (key) do update set data = excluded.data, rev = excluded.rev, updated_at = now()`,
+      rows[0]
+        ? "update app_docs set data = $2::jsonb, rev = $3, updated_at = now() where key = $1"
+        : "insert into app_docs (key, data, rev, updated_at) values ($1, $2::jsonb, $3, now())",
       [key, json, rev],
     );
     await client.query("insert into app_doc_history (key, rev, data) values ($1, $2, $3::jsonb)", [key, rev, json]);

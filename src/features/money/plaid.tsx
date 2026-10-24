@@ -151,7 +151,7 @@ async function refreshOnServer(ids: string[], trigger: "first-sync" | "sync"): P
   try {
     await flushCloud(); // the server works from the saved copy
     for (let round = 0; round < 10 && todo.length; round++) {
-      const r = await api<{ links: RefreshLink[] }>("refresh", { only: todo });
+      const r = await refreshCall(todo);
       for (const l of r.links) out.set(l.id, l.ok ? l.historyStatus || "OK" : undefined);
       todo = r.links.filter((l) => l.ok && l.hasMore).map((l) => l.id);
       await reloadFromCloud(); // show what's arrived so far
@@ -160,12 +160,38 @@ async function refreshOnServer(ids: string[], trigger: "first-sync" | "sync"): P
   } catch (e) {
     const err = e as Error & { code?: string };
     if (err.code === "NO_DATABASE") return "browser";
-    problem = { code: err.code || "UNREACHABLE", text: PROBLEMS[err.code ?? ""] ?? `Bank sync couldn't run: ${err.message}` };
+    problem = { code: err.code || "UNREACHABLE", text: PROBLEMS[err.code ?? ""] ?? (err.code === "DB_FAILED" ? err.message : `Bank sync couldn't run: ${err.message}`) };
     for (const id of ids) if (!out.has(id)) out.set(id, undefined);
   }
   // A finished sync refreshes the saved Financial Briefing.
   setMoneyData((d) => saveBriefing(d, trigger));
   return out;
+}
+
+const DB_TRIES = 5;
+
+/** One refresh call, tried again with growing waits while the database is busy. */
+async function refreshCall(only: string[]): Promise<{ links: RefreshLink[] }> {
+  for (let i = 1; ; i++) {
+    try {
+      const r = await api<{ links: RefreshLink[] }>("refresh", { only });
+      if (problem?.code === "DB_RETRY") {
+        problem = null;
+        notify();
+      }
+      return r;
+    } catch (e) {
+      const err = e as Error & { code?: string };
+      if ((err.code !== "DB_RETRY" && err.code !== "DB_ERROR") || i >= DB_TRIES) {
+        if (err.code === "DB_RETRY" || err.code === "DB_ERROR")
+          throw Object.assign(new Error(`Saving to the database failed ${DB_TRIES} times in a row (${err.message}) Nothing was lost; Refresh now tries again.`), { code: "DB_FAILED" });
+        throw e;
+      }
+      problem = { code: "DB_RETRY", text: `Retrying database save (try ${i + 1} of ${DB_TRIES})…` };
+      notify();
+      await new Promise((res) => setTimeout(res, 1500 * 2 ** (i - 1)));
+    }
+  }
 }
 
 /** Syncs these banks: on the server when the online database is in use, otherwise in this browser. */
@@ -696,7 +722,7 @@ function PlaidKeysForm({ onSaved, onCancel }: { onSaved: (r: KeysResult) => void
 
 type Health = {
   build: string;
-  database: { ok: boolean; code?: string; text?: string; rev?: number; sizeKb?: number };
+  database: { ok: boolean; code?: string; retry?: boolean; text?: string; rev?: number; sizeKb?: number };
   keys: { source: string; env: string | null; ok?: boolean; code?: string; problem?: string };
   money: { accounts: number; bankAccounts: number; transactions: number; bankTransactions: number } | null;
   links: {
@@ -719,6 +745,7 @@ type Line = { ok: boolean; text: string };
 function healthLines(h: Health): Line[] {
   const out: Line[] = [];
   out.push(h.database.ok ? { ok: true, text: "Online database: connected" } : { ok: false, text: h.database.text ?? "The online database isn't reachable." });
+  if (h.database.retry) return out; // still checking; the rest waits for the database
   if (h.keys.problem) out.push({ ok: false, text: h.keys.problem });
   else if (h.keys.ok) out.push({ ok: true, text: `Plaid keys: working (${h.keys.env === "production" ? "Production" : "Sandbox"}, ${h.keys.source === "vercel" ? "from Vercel settings" : h.keys.source === "site" ? "saved for the site" : "saved on this device"})` });
   if (h.database.ok && h.links.length === 0) out.push({ ok: false, text: "The online money data has no bank connections saved in it." });
@@ -746,7 +773,14 @@ export function SyncCheck({ compact = false }: { compact?: boolean }) {
   const activity = useSyncActivity();
   const check = useRef(async () => {
     try {
-      setH(await api<Health>("health", {}));
+      // A busy database is checked again a few times before it counts as a problem.
+      let r = await api<Health>("health", {});
+      for (let i = 1; r.database.retry && i < DB_TRIES; i++) {
+        setH(r);
+        await new Promise((res) => setTimeout(res, 1500 * 2 ** (i - 1)));
+        r = await api<Health>("health", {});
+      }
+      setH(r);
       setFailed("");
     } catch (e) {
       setFailed((e as Error).message);
