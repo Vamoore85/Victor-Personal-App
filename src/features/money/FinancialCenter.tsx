@@ -8,6 +8,7 @@ import { DEFAULT_CATEGORIES } from "./types";
 import { categoriesInUse, today } from "./calc";
 import { Accounts, Budgets, Overview, Transactions } from "./sections";
 import { Bills } from "./bill-intel-ui";
+import { Spending } from "./spending-ui";
 import { Institutions } from "./institutions";
 import { VaultAutoLock } from "./vault-ui";
 import { BankLinks, useAutoSync } from "./plaid";
@@ -25,12 +26,16 @@ const TABS = [
   { id: "accounts", label: "Accounts" },
   { id: "transactions", label: "Transactions" },
   { id: "bills", label: "Bills" },
+  { id: "spending", label: "Spending" },
   { id: "budgets", label: "Budgets" },
   { id: "books", label: "Company books" },
   { id: "receipts", label: "Receipts" },
   { id: "taxes", label: "Taxes" },
   { id: "institutions", label: "Maverick Vault" },
 ];
+
+const OWN_ENTITY = new Set(["bills", "spending"]);
+const entityFor = (v: ScopeView) => (v === "gladiator" ? ("gladiator" as const) : v === "all" ? undefined : ("pm" as const));
 
 export function FinancialCenter() {
   const data = useMoneyData();
@@ -104,6 +109,8 @@ export function FinancialCenter() {
     <div className="flex flex-col gap-4 lg:gap-5">
       <VaultAutoLock />
       <div className="flex flex-wrap items-center gap-3">
+        {/* Bills and Spending have their own owner choice, so this switch steps aside there. */}
+        {!OWN_ENTITY.has(tab) && <>
         <div role="radiogroup" aria-label="Show" className="inline-flex max-w-full overflow-x-auto rounded-full border border-zinc-300 bg-surface p-0.5 [scrollbar-width:none] dark:border-zinc-700">
           {([
             ["all", "All"],
@@ -128,6 +135,7 @@ export function FinancialCenter() {
             ? "Showing everything together"
             : `Showing ${COMPANIES.find((c) => c.value === view)?.legalName ?? "personal"} only`}
         </span>
+        </>}
         <CloudBadge state={cloud} />
       </div>
       <nav className="flex items-center justify-between gap-2">
@@ -191,7 +199,8 @@ export function FinancialCenter() {
         </>
       )}
       {tab === "transactions" && <Transactions data={shown} categories={categories} />}
-      {tab === "bills" && <Bills data={shown} categories={categories} goTo={setTab} />}
+      {tab === "bills" && <Bills data={data} categories={categories} goTo={setTab} initialEntity={entityFor(view)} />}
+      {tab === "spending" && <Spending data={data} goTo={setTab} initialEntity={entityFor(view)} />}
       {tab === "budgets" && <Budgets data={shown} categories={categories} />}
       {tab === "institutions" && <Institutions data={shown} />}
       {tab === "receipts" && <Receipts data={shown} />}

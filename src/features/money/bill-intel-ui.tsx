@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import { createLocalStore } from "@/lib/local-store";
+import { useState, type ReactNode } from "react";
 import {
   BUCKETS,
   CADENCES,
+  RECENT_DAYS,
   SCAN_DAYS,
   applyScan,
   briefingText,
@@ -13,6 +13,7 @@ import {
   bucketReport,
   cadenceLabel,
   confirmFinding,
+  coverage,
   detectRecurring,
   editFinding,
   effective,
@@ -21,68 +22,75 @@ import {
   reportWindow,
   scopeForBucket,
   setFindingStatus,
+  yearStart,
   type Bucket,
   type BucketReport,
   type ReportKind,
   type ReportLine,
 } from "./bill-intel";
-import { buildSample } from "./bill-sample";
 import { BillLedger, markBillPaid } from "./bills";
 import { AccountOwnerSelect, BucketChip } from "./bucket-ui";
 import { BILL_FREQUENCIES, type BillFrequency, type MoneyData, type RecurringCadence, type RecurringFinding, type Scope } from "./types";
 import { accountTypeLabel, addDays, frequencyLabel, money, shortDate, today } from "./calc";
-import { newId, setMoneyData } from "./store";
+import { newId } from "./store";
 import { Card, Empty, Field, buttonClass, ghostButtonClass, inputClass } from "./ui";
+import {
+  ControlBar,
+  CoverageNote,
+  DEFAULT_BILL_FILTERS,
+  DataSourceField,
+  RealEmpty,
+  SampleBanner,
+  Sheet,
+  Tag,
+  ago,
+  setPrefs,
+  usePrefs,
+  useWorkspace,
+  type BillsView,
+  type Chip,
+  type HistoryRange,
+  type OwnerView,
+  type StatusFilter,
+  type UpcomingRange,
+  type Update,
+} from "./intel-shared";
 
 /*
- * The Bills tab: briefings (Daily / Week / Month), the recurring-bill review
- * from a 120-day bank-history scan, the bill ledger, and which accounts belong
- * to which owner. Works on your real money data, or on a clearly labeled
- * sample workspace kept only in this browser.
+ * The Bills tab: what's coming up (today and tomorrow, 7 or 30 days), the
+ * recurring payments found in your history, your bill list, and which
+ * accounts belong to which owner. Works on your real money data, or on a
+ * clearly labeled sample workspace kept only in this browser.
  */
 
-type Update = (fn: (d: MoneyData) => MoneyData) => void;
-type Mode = "real" | "sample";
-type OwnerView = Bucket | "all";
-type View = "briefing" | "recurring" | "ledger" | "accounts";
-
-type SampleState = { generatedOn: string; edited: boolean; data: MoneyData | null };
-const sampleStore = createLocalStore<SampleState>("maverick.bills-sample.v1", { generatedOn: "", edited: false, data: null });
-// v2: the first version saved nothing useful and treated old hand-made bill rows as real data.
-const modeStore = createLocalStore<{ mode: Mode | null }>("maverick.bills-mode.v2", { mode: null });
-
-/**
- * Whether your real data is enough for bill intelligence: bank or imported
- * history from the last 120 days, or bills you've confirmed from a scan.
- * Bills typed in by hand on their own don't count, so the sample opens first.
- */
-export function realReadiness(d: MoneyData, t = today()) {
-  const from = addDays(t, -SCAN_DAYS);
-  const history = d.transactions.filter((x) => !x.transferId && x.date >= from && x.date <= t).length;
-  const confirmed = d.recurring.filter((f) => f.status === "confirmed").length + d.bills.filter((b) => b.recurringId).length;
-  return { history, confirmed, ready: history >= 10 || confirmed > 0 };
-}
-
-function resetSample() {
-  sampleStore.set(() => ({ generatedOn: today(), edited: false, data: buildSample() }));
-}
-const updateSample: Update = (fn) =>
-  sampleStore.set((s) => ({ generatedOn: s.generatedOn || today(), edited: true, data: fn(s.data ?? buildSample()) }));
-
-const seg = (on: boolean) =>
-  `shrink-0 rounded-md px-3 py-1.5 text-sm ${on ? "bg-surface font-medium text-brand shadow-sm dark:bg-zinc-800" : "text-zinc-600 dark:text-zinc-400"}`;
-
-function Segmented<T extends string>({ value, options, onChange, label }: { value: T; options: { id: T; label: ReactNode }[]; onChange: (v: T) => void; label: string }) {
-  return (
-    <div role="tablist" aria-label={label} className="flex min-w-0 gap-1 overflow-x-auto rounded-lg bg-zinc-200/60 p-1 [scrollbar-width:none] dark:bg-zinc-900">
-      {options.map((o) => (
-        <button key={o.id} role="tab" aria-selected={value === o.id} className={seg(value === o.id)} onClick={() => onChange(o.id)}>
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
+const VIEWS: { id: BillsView; label: string }[] = [
+  { id: "upcoming", label: "Upcoming" },
+  { id: "recurring", label: "Recurring" },
+  { id: "ledger", label: "Bill list" },
+  { id: "accounts", label: "Accounts" },
+];
+const UPCOMING: { id: UpcomingRange; label: string }[] = [
+  { id: "day", label: "Today and tomorrow" },
+  { id: "week", label: "Next 7 days" },
+  { id: "month", label: "Next 30 days" },
+];
+const HISTORY: { id: HistoryRange; label: string }[] = [
+  { id: "ytd", label: "Year to date" },
+  { id: "12m", label: "Last 12 months" },
+  { id: "120", label: `Last ${RECENT_DAYS} days` },
+  { id: "all", label: "All history scanned" },
+];
+const STATUS_OPTIONS: { id: StatusFilter; label: string }[] = [
+  { id: "open", label: "All but dismissed" },
+  { id: "review", label: "Needs review" },
+  { id: "detected", label: "Detected" },
+  { id: "confirmed", label: "Confirmed" },
+  { id: "dismissed", label: "Dismissed" },
+  { id: "everything", label: "Everything" },
+];
+const historyStart = (h: HistoryRange, t = today()) =>
+  h === "ytd" ? yearStart(t) : h === "12m" ? addDays(t, -364) : h === "120" ? addDays(t, -(RECENT_DAYS - 1)) : addDays(t, -SCAN_DAYS);
+const ukind: Record<UpcomingRange, ReportKind> = { day: "day", week: "week", month: "month" };
 
 const dayLabel = (ymd: string) => {
   const t = today();
@@ -91,117 +99,115 @@ const dayLabel = (ymd: string) => {
   if (ymd < t) return `Past due · ${shortDate(ymd)}`;
   return new Date(`${ymd}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 };
-const ago = (iso: string | null) => {
-  if (!iso) return "never";
-  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
-  if (m < 60) return `${Math.max(1, m)} min ago`;
-  if (m < 48 * 60) return `${Math.round(m / 60)} h ago`;
-  return new Date(iso).toLocaleDateString();
-};
 
 /* ---------------- Entry ---------------- */
 
-export function Bills({ data, categories, goTo }: { data: MoneyData; categories: string[]; goTo?: (tab: "accounts" | "books") => void }) {
-  const sample = sampleStore.use();
-  const saved = modeStore.use();
-  const readiness = realReadiness(data);
-  const mode: Mode = saved?.mode ?? (readiness.ready ? "real" : "sample");
-  const [owner, setOwner] = useState<OwnerView>("pm");
-  const [view, setView] = useState<View>("briefing");
+export function Bills({ data, categories, goTo, initialEntity }: { data: MoneyData; categories: string[]; goTo?: (tab: "accounts" | "books") => void; initialEntity?: OwnerView }) {
+  const { mode, ws, update, readiness } = useWorkspace(data);
+  const prefs = usePrefs();
+  const f = prefs.bills;
+  const owner: OwnerView = prefs.entity ?? initialEntity ?? "pm";
   const [open, setOpen] = useState<{ billId?: string; findingId?: string } | null>(null);
+  const setBills = (patch: Partial<typeof f>) => setPrefs((p) => ({ ...p, bills: { ...p.bills, ...patch } }));
 
-  // Build the sample the first time it's shown, and refresh it each day until you edit it.
-  useEffect(() => {
-    if (mode === "sample" && sample && (!sample.data || (!sample.edited && sample.generatedOn !== today()))) resetSample();
-  }, [mode, sample]);
-
-  const ws = mode === "sample" ? sample?.data : data;
-  const update: Update = mode === "sample" ? updateSample : setMoneyData;
   if (!ws) return <Empty>Loading the sample workspace…</Empty>;
 
-  const review = ws.recurring.filter((f) => f.status === "review" && (owner === "all" || effective(f).bucket === owner)).length;
   const buckets: Bucket[] = owner === "all" ? ["pm", "gladiator"] : [owner];
+  const review = ws.recurring.filter((x) => x.status === "review" && (owner === "all" || effective(x).bucket === owner)).length;
+  const accountName = new Map(ws.accounts.map((a) => [a.id, a.name]));
+
+  const chips: Chip[] = [];
+  if (f.view === "recurring" && f.status !== "open") chips.push({ label: STATUS_OPTIONS.find((s) => s.id === f.status)!.label, clear: () => setBills({ status: "open" }) });
+  if (f.view === "recurring" && !f.income) chips.push({ label: "Bills only (no money in)", clear: () => setBills({ income: true }) });
+  if (f.accountId && f.view !== "accounts") chips.push({ label: `Account: ${accountName.get(f.accountId) ?? "?"}`, clear: () => setBills({ accountId: "" }) });
+  if (f.category && f.view !== "accounts") chips.push({ label: `Category: ${f.category}`, clear: () => setBills({ category: "" }) });
+
+  const ranges = f.view === "upcoming" ? UPCOMING : f.view === "recurring" ? HISTORY : null;
+  const range = f.view === "upcoming" ? f.upcoming : f.history;
+  // Account and category filters apply to bills and findings alike.
+  const filtered: MoneyData = {
+    ...ws,
+    bills: ws.bills.filter((b) => (!f.accountId || b.accountId === f.accountId) && (!f.category || b.category === f.category)),
+    recurring: ws.recurring.filter((x) => (!f.accountId || x.accountIds.includes(f.accountId)) && (!f.category || effective(x).category === f.category)),
+  };
+  const usedCategories = [...new Set([...ws.bills.map((b) => b.category), ...ws.recurring.map((x) => effective(x).category)])].filter(Boolean).sort();
 
   return (
     <div className="flex flex-col gap-3 lg:gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Segmented
-          label="Data"
-          value={mode}
-          onChange={(m) => modeStore.set(() => ({ mode: m }))}
-          options={[
-            { id: "real", label: "Your data" },
-            { id: "sample", label: "Sample" },
-          ]}
-        />
-        <Segmented
-          label="Owner"
-          value={owner}
-          onChange={setOwner}
-          options={[
-            { id: "pm", label: "Personal / Maverick" },
-            { id: "gladiator", label: "Gladiator" },
-            { id: "all", label: "All entities" },
-          ]}
-        />
-      </div>
-
-      {mode === "sample" ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-400/60 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-          <span className="rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">Sample data</span>
-          <span className="order-last basis-full sm:order-none sm:min-w-0 sm:flex-1 sm:basis-0">Made-up accounts and bills to show how this works. Not your money. Edits stay in this browser only.</span>
-          <button className="underline" onClick={resetSample}>Reset sample</button>
-          <button className="font-medium underline" onClick={() => modeStore.set(() => ({ mode: "real" }))}>Use my data</button>
-        </div>
-      ) : (
-        !readiness.ready && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-zinc-200 bg-surface px-3 py-2 text-sm dark:border-zinc-800" data-testid="real-empty">
-            <span className="min-w-0 basis-full font-medium sm:flex-1 sm:basis-0">No connected bank history or confirmed bills yet.</span>
-            <span className="basis-full text-zinc-500">
-              {data.bills.length > 0 ? `Your ${data.bills.length} hand-entered bill${data.bills.length === 1 ? " is" : "s are"} under Bills. ` : ""}
-              Briefings and the 120-day scan need bank or statement history.
-            </span>
-            <button className="font-medium text-brand underline" onClick={() => modeStore.set(() => ({ mode: "sample" }))}>View sample</button>
-            {goTo && <button className="underline" onClick={() => goTo("accounts")}>Connect a bank</button>}
-            {goTo && <button className="underline" onClick={() => goTo("books")}>Import statements</button>}
+      <ControlBar
+        views={VIEWS.map((v) => (v.id === "recurring" && review > 0 ? { id: v.id, label: <>Recurring<span className="ml-1 rounded-full bg-amber-500 px-1.5 text-[10px] text-white">{review}</span></> } : v))}
+        view={f.view}
+        onView={(view) => setBills({ view })}
+        ranges={ranges as { id: string; label: string }[] | null}
+        range={range}
+        onRange={(r) => (f.view === "upcoming" ? setBills({ upcoming: r as UpcomingRange }) : setBills({ history: r as HistoryRange }))}
+        entity={owner}
+        onEntity={(entity) => setPrefs((p) => ({ ...p, entity }))}
+        chips={chips}
+        filterTitle="Bills filters"
+        filters={
+          <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Recurring: show">
+                <select className={inputClass} value={f.status} onChange={(e) => setBills({ status: e.target.value as StatusFilter })}>
+                  {STATUS_OPTIONS.map((s) => (
+                    <option key={s.id} value={s.id}>{s.label}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Paid from account">
+                <select className={inputClass} value={f.accountId} onChange={(e) => setBills({ accountId: e.target.value })}>
+                  <option value="">Every account</option>
+                  {ws.accounts.filter((a) => owner === "all" || bucketOf(a.scope) === owner).map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Category">
+                <select className={inputClass} value={f.category} onChange={(e) => setBills({ category: e.target.value })}>
+                  <option value="">Every category</option>
+                  {usedCategories.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </Field>
+              <label className="flex items-center gap-2 self-end pb-2 text-sm">
+                <input type="checkbox" checked={f.income} onChange={(e) => setBills({ income: e.target.checked })} /> Show money coming in under Recurring
+              </label>
+            </div>
+            <DataSourceField mode={mode} />
+            <button className="self-start text-xs underline" onClick={() => setBills({ ...DEFAULT_BILL_FILTERS, view: f.view, upcoming: f.upcoming, history: f.history })}>
+              Clear filters
+            </button>
           </div>
-        )
-      )}
-
-      <Segmented
-        label="Bills view"
-        value={view}
-        onChange={setView}
-        options={[
-          { id: "briefing", label: "Briefing" },
-          { id: "recurring", label: <>Recurring{review > 0 && <span className="ml-1 rounded-full bg-amber-500 px-1.5 text-[10px] text-white">{review}</span>}</> },
-          { id: "ledger", label: "Bills" },
-          { id: "accounts", label: "Accounts" },
-        ]}
+        }
       />
 
-      {view === "briefing" && <Briefing d={ws} buckets={buckets} onOpen={setOpen} onAccounts={() => setView("accounts")} />}
-      {view === "recurring" && <Recurring d={ws} owner={owner} update={update} sample={mode === "sample"} onOpen={setOpen} />}
-      {view === "ledger" && (
+      {mode === "sample" ? <SampleBanner /> : !readiness.ready && <RealEmpty bills={data.bills.length} goTo={goTo} />}
+
+      {f.view === "upcoming" && <Briefing d={filtered} kind={ukind[f.upcoming]} buckets={buckets} onOpen={setOpen} onAccounts={() => setBills({ view: "accounts" })} />}
+      {f.view === "recurring" && (
+        <Recurring d={filtered} all={ws} owner={owner} buckets={buckets} history={f.history} status={f.status} income={f.income} update={update} sample={mode === "sample"} onOpen={setOpen} onStatus={(status) => setBills({ status })} />
+      )}
+      {f.view === "ledger" && (
         <BillLedger
-          data={owner === "all" ? ws : { ...ws, bills: ws.bills.filter((b) => bucketOf(b.scope) === owner) }}
+          data={owner === "all" ? filtered : { ...filtered, bills: filtered.bills.filter((b) => bucketOf(b.scope) === owner) }}
           categories={categories}
           update={update}
           onOpen={(billId) => setOpen({ billId })}
           defaultScope={owner === "gladiator" ? "gladiator" : "personal"}
         />
       )}
-      {view === "accounts" && <Accounts d={ws} buckets={buckets} update={update} sample={mode === "sample"} goTo={goTo} />}
+      {f.view === "accounts" && <Accounts d={ws} buckets={buckets} update={update} sample={mode === "sample"} goTo={goTo} />}
 
       {open && <Detail d={ws} target={open} update={update} categories={categories} onClose={() => setOpen(null)} />}
     </div>
   );
 }
 
-/* ---------------- Briefings ---------------- */
+/* ---------------- Upcoming ---------------- */
 
-function Briefing({ d, buckets, onOpen, onAccounts }: { d: MoneyData; buckets: Bucket[]; onOpen: (t: { billId?: string; findingId?: string }) => void; onAccounts: () => void }) {
-  const [kind, setKind] = useState<ReportKind>("day");
+function Briefing({ d, kind, buckets, onOpen, onAccounts }: { d: MoneyData; kind: ReportKind; buckets: Bucket[]; onOpen: (t: { billId?: string; findingId?: string }) => void; onAccounts: () => void }) {
   const [copied, setCopied] = useState(false);
   const t = today();
   const w = reportWindow(kind, t);
@@ -211,27 +217,6 @@ function Briefing({ d, buckets, onOpen, onAccounts }: { d: MoneyData; buckets: B
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        <Segmented
-          label="Report"
-          value={kind}
-          onChange={setKind}
-          options={[
-            { id: "day", label: "Daily" },
-            { id: "week", label: "Week" },
-            { id: "month", label: "Month" },
-          ]}
-        />
-        <button
-          className={`${ghostButtonClass} shrink-0`}
-          onClick={() => {
-            void navigator.clipboard?.writeText(briefingText(kind, reports, money)).then(() => setCopied(true));
-            setTimeout(() => setCopied(false), 1500);
-          }}
-        >
-          {copied ? "Copied" : "Copy"}
-        </button>
-      </div>
       <div className={`grid gap-3 ${both ? "lg:grid-cols-2" : ""}`}>
         {reports.map((r) => (
           <BucketBriefing key={r.bucket} r={r} kind={kind} title={title} d={d} onOpen={onOpen} onAccounts={onAccounts} wide={!both} />
@@ -239,15 +224,25 @@ function Briefing({ d, buckets, onOpen, onAccounts }: { d: MoneyData; buckets: B
       </div>
       {both && (
         <p className="text-xs text-zinc-500">
-          All entities, added together on purpose: bills {money(reports.reduce((s, r) => s + r.outgoing, 0))}
+          Both owners added together, on purpose: bills {money(reports.reduce((s, r) => s + r.outgoing, 0))}
           {reports.every((r) => r.available !== null) && <> · available {money(reports.reduce((s, r) => s + (r.available ?? 0), 0))}</>}
           . Each owner&apos;s money pays only its own bills.
         </p>
       )}
-      <p className="text-xs text-zinc-500">
-        Bills come from your bill list. Balances come only from banks synced in the last day. Money coming in is counted only after you confirm it as
-        recurring. Shown in the app only; nothing is emailed or pushed.
-      </p>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
+        <span className="min-w-0 flex-1">
+          Bills come from your bill list; predictions from the recurring scan. Balances only from banks synced in the last day. Money coming in counts only after you confirm it. In the app only; nothing is emailed or pushed.
+        </span>
+        <button
+          className="shrink-0 underline"
+          onClick={() => {
+            void navigator.clipboard?.writeText(briefingText(kind, reports, money)).then(() => setCopied(true));
+            setTimeout(() => setCopied(false), 1500);
+          }}
+        >
+          {copied ? "Copied" : "Copy as text"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -290,6 +285,7 @@ function BucketBriefing({
           tone={r.alert === "short" ? "bad" : r.alert === "tight" ? "warn" : r.projected !== null ? "good" : undefined}
         />
       </div>
+      <NextDue r={r} onOpen={onOpen} />
       {r.incoming > 0 && <p className="text-xs text-zinc-500">Includes {money(r.incoming)} of confirmed money coming in.</p>}
       {r.alert === "short" && (
         <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">
@@ -381,98 +377,133 @@ function Figure({ label, value, tone, muted }: { label: string; value: string; t
   );
 }
 
-function Tag({ children, tone }: { children: ReactNode; tone?: "good" | "warn" }) {
+
+function NextDue({ r, onOpen }: { r: BucketReport; onOpen: (t: { billId?: string; findingId?: string }) => void }) {
+  const next = r.lines.find((l) => l.status === "scheduled");
+  if (!next) return null;
   return (
-    <span
-      className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
-        tone === "good" ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : tone === "warn" ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800"
-      }`}
+    <button
+      className="flex min-w-0 items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-left text-sm hover:border-ember dark:border-zinc-800"
+      onClick={() => onOpen(next.billId ? { billId: next.billId } : { findingId: next.findingId })}
     >
-      {children}
-    </span>
+      <span className="shrink-0 text-xs uppercase tracking-wide text-zinc-500">Next due</span>
+      <span className="min-w-0 flex-1 truncate font-medium">{next.name}</span>
+      <span className="shrink-0 text-xs text-zinc-500">{next.overdue ? "Past due" : dayLabel(next.date)}</span>
+      <span className="shrink-0 font-medium tabular-nums">{money(next.amount)}</span>
+    </button>
   );
 }
+
 
 /* ---------------- Recurring (scan + review) ---------------- */
 
 const STATUS_LABEL: Record<RecurringFinding["status"], string> = { review: "Needs review", detected: "Detected", confirmed: "Confirmed", dismissed: "Dismissed" };
+const STATUS_TONE: Record<RecurringFinding["status"], "warn" | "good" | undefined> = { review: "warn", detected: undefined, confirmed: "good", dismissed: undefined };
+const ORDER: Record<RecurringFinding["status"], number> = { review: 0, detected: 1, confirmed: 2, dismissed: 3 };
 
-function Recurring({ d, owner, update, sample, onOpen }: { d: MoneyData; owner: OwnerView; update: Update; sample: boolean; onOpen: (t: { findingId: string }) => void }) {
-  const mine = d.recurring.filter((f) => owner === "all" || effective(f).bucket === owner);
-  const counts = { review: 0, detected: 0, confirmed: 0, dismissed: 0 };
-  for (const f of mine) counts[f.status]++;
-  const [status, setStatus] = useState<RecurringFinding["status"]>(counts.review ? "review" : "detected");
+function Recurring({
+  d,
+  all,
+  owner,
+  buckets,
+  history,
+  status,
+  income,
+  update,
+  sample,
+  onOpen,
+  onStatus,
+}: {
+  d: MoneyData;
+  all: MoneyData;
+  owner: OwnerView;
+  buckets: Bucket[];
+  history: HistoryRange;
+  status: StatusFilter;
+  income: boolean;
+  update: Update;
+  sample: boolean;
+  onOpen: (t: { findingId: string }) => void;
+  onStatus: (s: StatusFilter) => void;
+}) {
   const [note, setNote] = useState("");
+  const t = today();
+  const start = historyStart(history, t);
+  const mine = d.recurring.filter((x) => (owner === "all" || effective(x).bucket === owner) && (income || x.direction === "out"));
+  const review = mine.filter((x) => x.status === "review").length;
   const list = mine
-    .filter((f) => f.status === status)
-    .sort((a, b) => (effective(a).nextDate ?? "9").localeCompare(effective(b).nextDate ?? "9"));
-  const scan = d.billScan;
+    .filter((x) => (status === "everything" ? true : status === "open" ? x.status !== "dismissed" : x.status === status))
+    .filter((x) => x.lastDate >= start) // paid at least once in the range
+    .map((x) => {
+      const paid = x.occurrences.filter((o) => o.date >= start && o.date <= t);
+      return { f: x, e: effective(x), paid: paid.reduce((s, o) => s + o.amount, 0), times: paid.length };
+    })
+    .sort((a, b) => ORDER[a.f.status] - ORDER[b.f.status] || b.paid - a.paid);
+  const scan = all.billScan;
   const accountName = new Map(d.accounts.map((a) => [a.id, a.name]));
+  const rangeLabel = HISTORY.find((h) => h.id === history)!.label;
+  const totals = buckets.map((b) => ({ b, out: list.filter((x) => x.e.bucket === b && x.f.direction === "out").reduce((s, x) => s + x.paid, 0) }));
 
   function runScan() {
-    const { found, scan: s } = detectRecurring(d);
+    const { found, scan: s } = detectRecurring(all);
     if (s.scanned === 0) {
       setNote(`No transactions dated ${s.windowStart} to ${s.windowEnd}, so there was nothing to scan. Connect a bank on Accounts or import statements under Company books.`);
       return;
     }
     update((x) => applyScan(x, found, s, newId));
-    setNote(`Scanned ${s.scanned} transactions from ${s.windowStart} to ${s.windowEnd}: ${s.found} repeating payment${s.found === 1 ? "" : "s"} found.`);
+    setNote(`Scanned ${s.scanned.toLocaleString()} transactions from ${s.windowStart} to ${s.windowEnd}: ${s.found} repeating payment${s.found === 1 ? "" : "s"} found.`);
   }
 
   return (
     <div className="flex flex-col gap-3">
-      <Card>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="min-w-0 flex-1 text-sm">
-            <p className="font-medium">Look back {SCAN_DAYS} days</p>
-            <p className="text-xs text-zinc-500">
-              {scan
-                ? `Last scan ${ago(scan.ranAt)}: ${scan.windowStart} to ${scan.windowEnd}, ${scan.scanned} transactions (${scan.bankFeed} from connected banks, ${scan.statement} from statements or typed in), ${scan.found} found.`
-                : "Not scanned yet. The scan reads posted transactions already in Maverick: bank feed and imported statements."}
-              {sample && " Sample transactions only."}
-            </p>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {totals.map(({ b, out }) => (
+          <div key={b} className="min-w-0 rounded-xl border border-zinc-200 bg-surface p-3 dark:border-zinc-800">
+            <p className="truncate text-[11px] uppercase tracking-wide text-zinc-500">{bucketLabel(b)} · {rangeLabel}</p>
+            <p className="mt-0.5 truncate text-lg font-semibold tabular-nums">{money(out)}</p>
+            <p className="text-xs text-zinc-500">paid to recurring payees</p>
           </div>
-          <button className={buttonClass} onClick={runScan}>
-            Scan {SCAN_DAYS} days
+        ))}
+        {review > 0 && (
+          <button className="min-w-0 rounded-xl border border-amber-400/60 bg-amber-50 p-3 text-left dark:bg-amber-950/30" onClick={() => onStatus("review")}>
+            <p className="text-[11px] uppercase tracking-wide text-amber-800 dark:text-amber-300">Needs review</p>
+            <p className="mt-0.5 text-lg font-semibold">{review}</p>
+            <p className="text-xs text-amber-800/80 dark:text-amber-300/80">Tap to see them</p>
           </button>
-        </div>
-        {note && <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">{note}</p>}
-      </Card>
+        )}
+      </div>
 
-      <Segmented
-        label="Status"
-        value={status}
-        onChange={setStatus}
-        options={(["review", "detected", "confirmed", "dismissed"] as const).map((s) => ({ id: s, label: `${STATUS_LABEL[s]} (${counts[s]})` }))}
-      />
+      {buckets.map((b) => (
+        <CoverageNote key={b} cover={coverage(all, b, start, t)} start={start} end={t} label={bucketLabel(b)} />
+      ))}
 
       {list.length === 0 ? (
-        <Empty>{status === "review" ? "Nothing waiting for review." : `Nothing ${STATUS_LABEL[status].toLowerCase()}.`}</Empty>
+        <Empty>{status === "review" ? "Nothing waiting for review." : `No recurring payments paid in this range.`}</Empty>
       ) : (
         <Card>
           {/* Phone: compact rows */}
           <ul className="divide-y divide-zinc-200 lg:hidden dark:divide-zinc-800">
-            {list.map((f) => {
-              const e = effective(f);
-              return (
-                <li key={f.id} className="flex flex-col gap-1 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <button className="min-w-0 truncate text-left text-sm font-medium" onClick={() => onOpen({ findingId: f.id })}>
-                      {e.name}
-                    </button>
-                    <BucketChip bucket={e.bucket} />
-                    {f.direction === "in" && <Tag tone="good">Income</Tag>}
-                    <span className="ml-auto shrink-0 text-sm font-medium tabular-nums">{money(e.amount)}</span>
-                  </div>
-                  <p className="truncate text-xs text-zinc-500">
-                    Next {e.nextDate ? shortDate(e.nextDate) : "unknown"} · {cadenceLabel(e.cadence)} · {f.confidence} confidence · last {shortDate(f.lastDate)}
-                  </p>
-                  <FindingActions f={f} update={update} onOpen={() => onOpen({ findingId: f.id })} />
-                </li>
-              );
-            })}
+            {list.map(({ f, e, paid, times }) => (
+              <li key={f.id} className="flex flex-col gap-1 py-2.5">
+                <div className="flex items-center gap-2">
+                  <button className="min-w-0 truncate text-left text-sm font-medium" onClick={() => onOpen({ findingId: f.id })}>
+                    {e.name}
+                  </button>
+                  {f.status !== "detected" && <Tag tone={STATUS_TONE[f.status]}>{STATUS_LABEL[f.status]}</Tag>}
+                  {f.direction === "in" && <Tag tone="good">Income</Tag>}
+                  <span className="ml-auto shrink-0 text-sm font-medium tabular-nums">{money(e.amount)}</span>
+                </div>
+                <p className="truncate text-xs text-zinc-500">
+                  {cadenceLabel(e.cadence)} · last {shortDate(f.lastDate)} · next {e.nextDate ? shortDate(e.nextDate) : "unknown"}
+                </p>
+                <p className="truncate text-xs text-zinc-500">
+                  {money(paid)} paid {history === "ytd" ? "this year" : "in range"} ({times}×){owner === "all" && ` · ${bucketLabel(e.bucket)}`}
+                </p>
+                <FindingActions f={f} update={update} onOpen={() => onOpen({ findingId: f.id })} />
+              </li>
+            ))}
           </ul>
-          {/* Desktop: review table */}
+          {/* Desktop: table */}
           <table className="hidden w-full text-left text-sm lg:table">
             <thead>
               <tr className="border-b border-zinc-200 text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
@@ -481,45 +512,60 @@ function Recurring({ d, owner, update, sample, onOpen }: { d: MoneyData; owner: 
                 <th className="py-2 pr-3 font-medium">How often</th>
                 <th className="py-2 pr-3 font-medium">Last paid</th>
                 <th className="py-2 pr-3 font-medium">Next</th>
-                <th className="py-2 pr-3 font-medium">Confidence</th>
+                <th className="py-2 pr-3 text-right font-medium">{history === "ytd" ? "Paid YTD" : "Paid in range"}</th>
                 <th className="py-2 pr-3 font-medium">Account</th>
                 <th className="py-2 font-medium" />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-              {list.map((f) => {
-                const e = effective(f);
-                return (
-                  <tr key={f.id} className="align-top">
-                    <td className="py-2 pr-3">
-                      <button className="font-medium hover:underline" onClick={() => onOpen({ findingId: f.id })}>
-                        {e.name}
-                      </button>
-                      <div className="mt-0.5 flex gap-1">
-                        <BucketChip bucket={e.bucket} />
-                        {f.direction === "in" && <Tag tone="good">Income</Tag>}
-                        {e.edited && <Tag>Edited</Tag>}
-                      </div>
-                    </td>
-                    <td className="py-2 pr-3 text-right tabular-nums">
-                      {money(e.amount)}
-                      {f.max - f.min >= 0.01 && <p className="text-xs text-zinc-500">{money(f.min)}–{money(f.max)}</p>}
-                    </td>
-                    <td className="py-2 pr-3">{cadenceLabel(e.cadence)}</td>
-                    <td className="py-2 pr-3 tabular-nums">{shortDate(f.lastDate)}</td>
-                    <td className="py-2 pr-3 tabular-nums">{e.nextDate ? shortDate(e.nextDate) : <span className="text-zinc-400">Unknown</span>}</td>
-                    <td className="py-2 pr-3 capitalize">{f.confidence}</td>
-                    <td className="max-w-[10rem] truncate py-2 pr-3 text-zinc-500">{f.accountIds.map((id) => accountName.get(id) ?? "Removed account").join(", ")}</td>
-                    <td className="py-2">
-                      <FindingActions f={f} update={update} onOpen={() => onOpen({ findingId: f.id })} />
-                    </td>
-                  </tr>
-                );
-              })}
+              {list.map(({ f, e, paid, times }) => (
+                <tr key={f.id} className="align-top">
+                  <td className="py-2 pr-3">
+                    <button className="font-medium hover:underline" onClick={() => onOpen({ findingId: f.id })}>
+                      {e.name}
+                    </button>
+                    <div className="mt-0.5 flex flex-wrap gap-1">
+                      {owner === "all" && <BucketChip bucket={e.bucket} />}
+                      <Tag tone={STATUS_TONE[f.status]}>{STATUS_LABEL[f.status]}</Tag>
+                      {f.direction === "in" && <Tag tone="good">Income</Tag>}
+                      {e.edited && <Tag>Edited</Tag>}
+                      <span className="text-[10px] uppercase tracking-wide text-zinc-400">{f.confidence} confidence</span>
+                    </div>
+                  </td>
+                  <td className="py-2 pr-3 text-right tabular-nums">
+                    {money(e.amount)}
+                    {f.max - f.min >= 0.01 && <p className="text-xs text-zinc-500">{money(f.min)}–{money(f.max)}</p>}
+                  </td>
+                  <td className="py-2 pr-3">{cadenceLabel(e.cadence)}</td>
+                  <td className="py-2 pr-3 tabular-nums">{shortDate(f.lastDate)}</td>
+                  <td className="py-2 pr-3 tabular-nums">{e.nextDate ? shortDate(e.nextDate) : <span className="text-zinc-400">Unknown</span>}</td>
+                  <td className="py-2 pr-3 text-right tabular-nums">
+                    {money(paid)}
+                    <p className="text-xs text-zinc-500">{times}×</p>
+                  </td>
+                  <td className="max-w-[10rem] truncate py-2 pr-3 text-zinc-500">{f.accountIds.map((id) => accountName.get(id) ?? "Removed account").join(", ")}</td>
+                  <td className="py-2">
+                    <FindingActions f={f} update={update} onOpen={() => onOpen({ findingId: f.id })} />
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </Card>
       )}
+
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
+        <span className="min-w-0 flex-1">
+          {scan
+            ? `Last scan ${ago(scan.ranAt)}: ${scan.windowStart} to ${scan.windowEnd}, ${scan.scanned.toLocaleString()} transactions (${scan.bankFeed.toLocaleString()} bank feed, ${scan.statement.toLocaleString()} statements or typed in), ${scan.found} found.`
+            : "Not scanned yet. The scan reads up to two years of posted transactions already in Maverick: bank feed and imported statements."}
+          {sample && " Sample transactions only."}
+        </span>
+        <button className="shrink-0 font-medium text-brand underline" onClick={runScan}>
+          Scan again
+        </button>
+      </div>
+      {note && <p className="text-xs text-zinc-600 dark:text-zinc-400">{note}</p>}
     </div>
   );
 }
@@ -571,7 +617,7 @@ function Detail({
   const e = finding ? effective(finding) : null;
   const accountName = new Map(d.accounts.map((a) => [a.id, a.name]));
 
-  // History: the scan's evidence, or for a hand-added bill, matching transactions in the last 120 days.
+  // History: the scan's evidence, or for a hand-added bill, matching transactions in the history scanned.
   const billKey = linkedBill ? merchantKey(linkedBill.name) : "";
   const from = addDays(today(), -SCAN_DAYS);
   const history = finding
@@ -589,12 +635,6 @@ function Detail({
       ? { name: e.name, amount: String(e.amount), freq: e.cadence as string, next: e.nextDate ?? "", category: e.category, scope: e.scope }
       : null;
   const [form, setForm] = useState(init);
-
-  useEffect(() => {
-    const onKey = (ev: KeyboardEvent) => ev.key === "Escape" && onClose();
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   if (!form || (!editingBill && !finding)) {
     return (
@@ -672,7 +712,7 @@ function Detail({
             {finding.reasons.map((x) => (
               <li key={x}>{x}</li>
             ))}
-            <li>Matched by payee name &quot;{finding.merchant}&quot; on {bucketLabel(bucketOf(finding.scope))} accounts in the last {SCAN_DAYS} days.</li>
+            <li>Matched by payee name &quot;{finding.merchant}&quot; on {bucketLabel(bucketOf(finding.scope))} accounts, in up to two years of history.</li>
             {e?.edited && <li>Your edits override what was detected.</li>}
           </ul>
         </div>
@@ -748,9 +788,11 @@ function Detail({
       </div>
 
       <div>
-        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500">Payment history ({history.length})</p>
+        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
+          Payment history ({history.length}) · paid this year {money(history.filter((o) => o.date >= yearStart(today())).reduce((s, o) => s + o.amount, 0))}
+        </p>
         {history.length === 0 ? (
-          <Empty>No matching bank transactions in the last {SCAN_DAYS} days.</Empty>
+          <Empty>No matching bank or statement transactions in the history here.</Empty>
         ) : (
           <ul className="divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
             {[...history].reverse().map((o) => (
@@ -778,27 +820,9 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-/** Full-height sheet on phones, a centered panel on bigger screens. */
-function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  return (
-    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={title}>
-      <button className="absolute inset-0 bg-black/40" aria-label="Close" onClick={onClose} />
-      <div className="absolute inset-x-0 bottom-0 flex max-h-[92dvh] flex-col gap-3 overflow-y-auto rounded-t-2xl bg-surface p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:inset-x-auto sm:top-1/2 sm:left-1/2 sm:bottom-auto sm:w-[40rem] sm:max-w-[calc(100vw-2rem)] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl">
-        <div className="flex items-center gap-2">
-          <h2 className="min-w-0 flex-1 truncate text-base font-semibold">{title}</h2>
-          <button className="h-8 w-8 shrink-0 rounded-full bg-zinc-100 text-lg leading-none dark:bg-zinc-800" aria-label="Close" onClick={onClose}>
-            ×
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
 /* ---------------- Accounts by owner ---------------- */
 
-function Accounts({ d, buckets, update, sample, goTo }: { d: MoneyData; buckets: Bucket[]; update: Update; sample: boolean; goTo?: (tab: "accounts") => void }) {
+function Accounts({ d, buckets, update, sample, goTo }: { d: MoneyData; buckets: Bucket[]; update: Update; sample: boolean; goTo?: (tab: "accounts" | "books") => void }) {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-zinc-500">

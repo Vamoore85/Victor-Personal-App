@@ -125,7 +125,7 @@ export type Bill = {
  * stick; a new scan only refreshes the evidence. A confirmed outgoing finding
  * becomes a Bill, and from then on the Bill is what you edit.
  */
-export type RecurringCadence = "weekly" | "biweekly" | "monthly" | "quarterly" | "irregular";
+export type RecurringCadence = "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly" | "irregular";
 
 export type RecurringOccurrence = {
   txnId: string;
@@ -162,7 +162,7 @@ export type RecurringFinding = {
 
 export type BillScan = {
   ranAt: string; // ISO time
-  windowStart: string; // YYYY-MM-DD, 120 days back
+  windowStart: string; // YYYY-MM-DD, 12 months back (older scans: 120 days)
   windowEnd: string;
   scanned: number; // transactions in the window
   bankFeed: number; // of those, from connected banks

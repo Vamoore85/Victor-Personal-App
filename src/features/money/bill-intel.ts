@@ -34,16 +34,25 @@ export const bucketOf = (scope: Scope | undefined): Bucket => (scope === "gladia
 export const scopeForBucket = (b: Bucket, current: Scope | undefined): Scope =>
   b === "gladiator" ? "gladiator" : current === "business" ? "business" : "personal";
 
-export const SCAN_DAYS = 120;
+/**
+ * The scan reads up to two years of history (what a connected bank sends at
+ * most), so yearly bills can be seen twice. That always covers the year to date
+ * and the last 12 months; how far back your data really goes is shown as coverage.
+ */
+export const SCAN_DAYS = 730;
+/** The "recent" view of what's still coming out. */
+export const RECENT_DAYS = 120;
+export const yearStart = (today: string) => `${today.slice(0, 4)}-01-01`;
 
 const CADENCE: Record<Exclude<RecurringCadence, "irregular">, { days: number; lo: number; hi: number; label: string }> = {
   weekly: { days: 7, lo: 6, hi: 8, label: "Weekly" },
   biweekly: { days: 14, lo: 12, hi: 16, label: "Every 2 weeks" },
   monthly: { days: 30.4, lo: 24, hi: 38, label: "Monthly" },
   quarterly: { days: 91, lo: 80, hi: 100, label: "Every 3 months" },
+  yearly: { days: 365, lo: 350, hi: 380, label: "Yearly" },
 };
 export const cadenceLabel = (c: RecurringCadence) => (c === "irregular" ? "Irregular" : CADENCE[c].label);
-export const CADENCES: RecurringCadence[] = ["weekly", "biweekly", "monthly", "quarterly", "irregular"];
+export const CADENCES: RecurringCadence[] = ["weekly", "biweekly", "monthly", "quarterly", "yearly", "irregular"];
 export const frequencyFor = (c: RecurringCadence): BillFrequency => (c === "irregular" ? "monthly" : c);
 
 /* ---------------- Merchant names ---------------- */
@@ -64,7 +73,7 @@ export function merchantKey(description: string) {
   return words.slice(0, 2).join(" ");
 }
 
-function displayName(key: string, sample: string) {
+export function displayName(key: string, sample: string) {
   const name = key || sample;
   return name
     .toLowerCase()
@@ -104,7 +113,7 @@ type Detected = Omit<RecurringFinding, "id" | "status" | "billId" | "overrides" 
 export function stepCadence(cadence: RecurringCadence, usualDay: number, from: string): string | null {
   if (cadence === "irregular") return null;
   return nextDueAfter(
-    { frequency: cadence, dueDay: cadence === "monthly" || cadence === "quarterly" ? usualDay : 0, nextDue: from } as Bill,
+    { frequency: cadence, dueDay: cadence === "monthly" || cadence === "quarterly" || cadence === "yearly" ? usualDay : 0, nextDue: from } as Bill,
     from,
   );
 }
@@ -169,14 +178,18 @@ function analyseOnce(key: string, direction: "out" | "in", scope: Scope, txns: T
   const reasons: string[] = [];
   let cadence: RecurringCadence;
   let confidence: Detected["confidence"];
-  const enough = { weekly: 5, biweekly: 4, monthly: 3, quarterly: 3 } as const;
+  const enough = { weekly: 5, biweekly: 4, monthly: 3, quarterly: 3, yearly: 2 } as const;
   if (match && regular >= 0.6 && spread <= 1) {
     cadence = match;
     reasons.push(`${n} payments, usually ${Math.round(gap)} days apart (${cadenceLabel(match).toLowerCase()})`);
     if (regular >= 0.8 && n >= enough[match] && spread <= 0.15) confidence = "high";
     else if (spread <= 0.35) confidence = "medium";
     else confidence = "low";
-    if (n < enough[match]) reasons.push(`Only ${n} seen in ${SCAN_DAYS} days, so the timing is a best guess`);
+    if (n < enough[match]) reasons.push(`Only ${n} seen in the history scanned, so the timing is a best guess`);
+    if (match === "yearly" && confidence === "high") {
+      confidence = "medium";
+      reasons.push("Seen once a year, so there are only two payments to go on");
+    }
     if (regular < 0.8) reasons.push("Some gaps don't fit the pattern");
   } else if (n >= 3 && spread <= 0.15) {
     cadence = "irregular";
@@ -232,7 +245,7 @@ function mostCommon(xs: string[]) {
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "Other";
 }
 
-/** Scans the last 120 days of posted transactions for repeating bills and income. */
+/** Scans up to two years of posted transactions (the year to date, the last 12 months and before) for repeating bills and income. */
 export function detectRecurring(d: MoneyData, today = todayYmd()) {
   const windowStart = addDays(today, -SCAN_DAYS);
   const scopeOf = new Map(d.accounts.map((a) => [a.id, a.scope ?? "personal"]));
@@ -341,7 +354,7 @@ export function confirmFinding(d: MoneyData, id: string, newId: () => string): M
     category: e.category,
     frequency: frequencyFor(e.cadence),
     nextDue,
-    dueDay: e.cadence === "monthly" || e.cadence === "quarterly" || e.cadence === "irregular" ? f.usualDay : Number(nextDue.slice(8, 10)),
+    dueDay: e.cadence === "monthly" || e.cadence === "quarterly" || e.cadence === "yearly" || e.cadence === "irregular" ? f.usualDay : Number(nextDue.slice(8, 10)),
     accountId: f.accountIds[0] ?? "",
     autopay: true,
     scope: e.scope,
@@ -369,6 +382,30 @@ export function editFinding(d: MoneyData, id: string, patch: NonNullable<Recurri
       return { ...x, overrides };
     }),
   };
+}
+
+/* ---------------- What history is actually here ---------------- */
+
+export type Coverage = {
+  first: string | null; // earliest transaction in the range, across the owner's accounts
+  last: string | null;
+  count: number;
+  accounts: { account: Account; first: string | null; last: string | null; count: number; bank: number; statement: number }[];
+  full: boolean; // history reaches back to the start of the range (within a week)
+};
+
+/** Which dates the owner's transactions really cover inside [start, end], account by account. */
+export function coverage(d: MoneyData, bucket: Bucket | "all", start: string, end: string): Coverage {
+  const accts = d.accounts.filter((a) => bucket === "all" || bucketOf(a.scope) === bucket);
+  const rows = accts.map((account) => {
+    const ts = d.transactions.filter((t) => t.accountId === account.id && t.date >= start && t.date <= end);
+    const dates = ts.map((t) => t.date).sort();
+    return { account, first: dates[0] ?? null, last: dates[dates.length - 1] ?? null, count: ts.length, bank: ts.filter((t) => t.plaidId).length, statement: ts.filter((t) => !t.plaidId).length };
+  });
+  const firsts = rows.map((r) => r.first).filter((x): x is string => !!x).sort();
+  const lasts = rows.map((r) => r.last).filter((x): x is string => !!x).sort();
+  const first = firsts[0] ?? null;
+  return { first, last: lasts[lasts.length - 1] ?? null, count: rows.reduce((s, r) => s + r.count, 0), accounts: rows, full: !!first && first <= addDays(start, 7) };
 }
 
 /* ---------------- Money on hand ---------------- */

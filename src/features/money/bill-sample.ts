@@ -5,8 +5,9 @@ import { EMPTY_DATA, type Account, type Bill, type MoneyData, type Transaction }
 /*
  * A made-up workspace for trying the bill briefings before real bank data is
  * in. Every name, account and amount here is invented ("Sample …"), and it is
- * built fresh relative to today so Daily, Week and Month all have something
- * to show. It is never mixed into your real money data.
+ * built fresh relative to today, reaching back to January 1 of last year, so
+ * the bill briefings and the year-to-date and 12-month spending reports all
+ * have something to show. It is never mixed into your real money data.
  */
 
 export const SAMPLE_PREFIX = "sample-";
@@ -34,7 +35,7 @@ type Pattern = {
   category: string;
   amount: number;
   vary?: number; // ± this much
-  every: "month" | 14 | 91;
+  every: "month" | 14 | 91 | 365;
   next: number; // days from today of the next payment
   count?: number; // how many past payments to make (default: all in 120 days)
   income?: boolean;
@@ -46,6 +47,7 @@ const ACCOUNTS: Account[] = [
   { id: "sample-psav", name: "Sample Savings (not linked)", type: "savings", openingBalance: 2000, scope: "personal" },
   { id: "sample-gchk", name: "Sample Gladiator Operating", type: "checking", openingBalance: 0, scope: "gladiator", last4: "0003", plaid: { linkId: "sample-link2", accountId: "b1" } },
   { id: "sample-gcard", name: "Sample Gladiator Card", type: "credit", openingBalance: 0, scope: "gladiator", last4: "0004", plaid: { linkId: "sample-link2", accountId: "b2" } },
+  { id: "sample-pcard", name: "Sample Rewards Card", type: "credit", openingBalance: 0, scope: "personal", last4: "0005", plaid: { linkId: "sample-link1", accountId: "a3" } },
 ];
 
 const BALANCES: Record<string, { current: number; available: number | null }> = {
@@ -53,6 +55,7 @@ const BALANCES: Record<string, { current: number; available: number | null }> = 
   "sample-mchk": { current: 5410, available: 5410 },
   "sample-gchk": { current: 6912.15, available: 6850.15 },
   "sample-gcard": { current: 1290.5, available: null },
+  "sample-pcard": { current: 642.18, available: null },
 };
 
 const PATTERNS: Pattern[] = [
@@ -72,13 +75,33 @@ const PATTERNS: Pattern[] = [
   { description: "CLOUDDESK SOFTWARE", accountId: "sample-gchk", category: "Software & subscriptions", amount: 129, every: "month", next: 8 },
   { description: "SAMPLE CLIENT RECEIVABLE", accountId: "sample-gchk", category: "Sales & services", amount: 9500, every: "month", next: 17, income: true },
   { description: "SAMPLE FLEET INSURANCE", accountId: "sample-gchk", category: "Business insurance", amount: 640, every: 91, next: 61 },
+  // Once a year
+  { description: "SAMPLE DOMAIN & HOSTING RENEWAL", accountId: "sample-gcard", category: "Software & subscriptions", amount: 310, every: 365, next: 75 },
+  { description: "SAMPLE STATE VEHICLE REGISTRATION", accountId: "sample-pchk", category: "Transportation", amount: 187, every: 365, next: 150 },
+];
+
+/* Everyday spending: [description, account, category, typical amount, times per month]. */
+const EVERYDAY: [string, string, string, number, number][] = [
+  ["FRESHWAY MARKET", "sample-pcard", "Groceries", 96, 4.3],
+  ["LAKESIDE GRILL", "sample-pcard", "Dining", 48, 2.5],
+  ["BEANERY COFFEE", "sample-pcard", "Dining", 7.5, 6],
+  ["QUICKFUEL STATION", "sample-pcard", "Transportation", 52, 3.5],
+  ["ONLINE MART ORDER", "sample-pcard", "Other", 41, 2.2], // left in a catch-all to show suggestions
+  ["CORNER HARDWARE", "sample-pchk", "Shopping", 38, 0.8],
+  ["NEIGHBORHOOD PHARMACY", "sample-pcard", "Health", 24, 1],
+  ["OFFICE SUPPLY DEPOT", "sample-gcard", "Supplies", 85, 1.6],
+  ["CLIENT LUNCH BISTRO", "sample-gcard", "Business meals", 64, 1.8],
+  ["FLEET FUEL STOP", "sample-gcard", "Vehicle", 71, 3],
+  ["SAMPLE COURIER SHIPPING", "sample-gcard", "Other business expenses", 28, 1.2],
 ];
 
 // Recognized as bills in the sample (the rest stay for you to review).
-const CONFIRMED = ["NORTHWIND MOBILE", "BRIGHTLINE POWER", "CEDAR RIDGE", "SUMMIT AUTO", "PIXELWORKS SOFTWARE", "PAYROLL SERVICE", "METRO OFFICE", "CLOUDDESK SOFTWARE", "SAMPLE CLIENT|pm"];
+const CONFIRMED = ["NORTHWIND MOBILE", "BRIGHTLINE POWER", "CEDAR RIDGE", "SUMMIT AUTO", "PIXELWORKS SOFTWARE", "PAYROLL SERVICE", "METRO OFFICE", "CLOUDDESK SOFTWARE", "SAMPLE FLEET", "SAMPLE CLIENT|pm"];
 
 export function buildSample(today = todayYmd(), now = Date.now()): MoneyData {
-  const start = addDays(today, -119);
+  // Back to January 1 of last year, and at least two years, so every report range has history.
+  const jan = `${+today.slice(0, 4) - 1}-01-01`;
+  const start = addDays(today, -730) < jan ? addDays(today, -730) : jan;
   const txns: Transaction[] = [];
   let n = 0;
   const push = (t: Omit<Transaction, "id" | "plaidId">) => {
@@ -102,6 +125,23 @@ export function buildSample(today = todayYmd(), now = Date.now()): MoneyData {
       date = p.every === "month" ? shiftMonths(first, -i) : addDays(first, -p.every * i);
     }
   }
+  // Everyday spending, a little lower last year so the comparison has something to say.
+  for (const [description, accountId, category, typical, perMonth] of EVERYDAY) {
+    const gap = 30.44 / perMonth;
+    let i = 0;
+    for (let back = 1 + Math.abs(Math.round(wobble(description, 0, 3))); addDays(today, -back) >= start; back += Math.max(1, Math.round(gap + wobble(description, i, gap * 0.4)))) {
+      const date = addDays(today, -back);
+      const lastYear = date < `${today.slice(0, 4)}-01-01` ? 0.92 : 1;
+      push({ date, description, amount: Math.round(Math.max(2, typical * lastYear + wobble(description, i++, typical * 0.35)) * 100) / 100, kind: "expense", category, accountId });
+    }
+  }
+  // A return, and card payments from checking (the purchases already count on the card).
+  push({ date: addDays(today, -9), description: "ONLINE MART RETURN REFUND", amount: 36.5, kind: "income", category: "Other income", accountId: "sample-pcard" });
+  for (let m = 0; shiftMonths(addDays(today, -4), -m) >= start; m++) {
+    const date = shiftMonths(addDays(today, -4), -m);
+    const id = `sample-cp${m}`;
+    txns.push({ id: `${id}a`, date, description: "SAMPLE REWARDS CARD PAYMENT THANK YOU", amount: 900 + Math.round(wobble("cp", m, 150)), kind: "expense", category: "Debt payments", accountId: "sample-pchk" });
+  }
   // An ambiguous one for the review queue: same amount, no steady timing.
   for (const back of [11, 40, 83]) push({ date: addDays(today, -back), description: "CITY PARKING PERMIT", amount: 30, kind: "expense", category: "Transportation", accountId: "sample-pchk" });
   // One-offs and everyday spending that should never show up as bills.
@@ -110,7 +150,7 @@ export function buildSample(today = todayYmd(), now = Date.now()): MoneyData {
   push({ date: addDays(today, -52), description: "CORNER HARDWARE", amount: 18.4, kind: "expense", category: "Shopping", accountId: "sample-pchk" });
   push({ date: addDays(today, -33), description: "SAMPLE NOTARY SERVICES", amount: 45, kind: "expense", category: "Legal & professional", accountId: "sample-gchk" });
   // A monthly move to savings between your own accounts: a transfer, not a bill.
-  for (const back of [3, 33, 63, 94]) {
+  for (let back = 3; addDays(today, -back) >= start; back += 30) {
     const id = `sample-x${back}`;
     txns.push({ id: `${id}a`, date: addDays(today, -back), description: "TRANSFER TO SAVINGS", amount: 200, kind: "expense", category: "Transfer", accountId: "sample-pchk", transferId: id });
     txns.push({ id: `${id}b`, date: addDays(today, -back), description: "TRANSFER FROM CHECKING", amount: 200, kind: "income", category: "Transfer", accountId: "sample-psav", transferId: id });
