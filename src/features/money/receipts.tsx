@@ -173,8 +173,8 @@ export function Receipts({ data }: { data: MoneyData }) {
   const accountScope = new Map(data.accounts.map((a) => [a.id, (a.scope ?? "personal") as Scope]));
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="grid gap-4 sm:grid-cols-3">
+    <div className="flex flex-col gap-4 lg:gap-5">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3">
         <Stat label="Receipts saved" value={String(data.receipts.length)} />
         <Stat label="Not matched yet" value={String(unmatched)} tone={unmatched > 0 ? "bad" : undefined} />
         <Stat label={`Business costs missing a receipt (${year})`} value={String(missing.length)} tone={missing.length > 0 ? "bad" : "good"} />

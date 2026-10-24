@@ -33,7 +33,7 @@ function IdeaCard({ idea }: { idea: Idea }) {
 
   return (
     <article
-      className={`mb-4 break-inside-avoid rounded-xl border p-4 ${
+      className={`mb-4 break-inside-avoid rounded-xl border bg-surface p-4 ${
         idea.pinned ? "border-ember bg-ember/5" : "border-zinc-200 dark:border-zinc-800"
       }`}
     >
@@ -104,8 +104,8 @@ export function Ideas() {
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.createdAt.localeCompare(a.createdAt));
 
   return (
-    <div className="flex flex-col gap-6">
-      <section className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
+    <div className="flex flex-col gap-4 lg:gap-5">
+      <section className="rounded-xl border bg-surface border-zinc-200 p-4 dark:border-zinc-800">
         <textarea
           className="min-h-28 w-full resize-y bg-transparent text-base outline-none placeholder:text-zinc-400"
           placeholder="Dump an idea. Anything goes. Add #tags to group them later."

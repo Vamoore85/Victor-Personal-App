@@ -59,8 +59,8 @@ export function Overview({ data, goTo }: { data: MoneyData; goTo: (tab: string) 
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="grid gap-4 sm:grid-cols-3">
+    <div className="flex flex-col gap-4 lg:gap-5">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3">
         <Stat label="Net worth" value={money(assets - debts)} tone={assets - debts >= 0 ? "good" : "bad"} />
         <Stat label="Assets" value={money(assets)} />
         <Stat label="Debts" value={money(debts)} tone={debts > 0 ? "bad" : undefined} />
@@ -90,7 +90,7 @@ export function Overview({ data, goTo }: { data: MoneyData; goTo: (tab: string) 
         <UpcomingBills data={data} days={14} />
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-4 lg:gap-5 lg:grid-cols-2">
         <Card
           title="Budgets this month"
           action={<button className={ghostButtonClass} onClick={() => goTo("budgets")}>Manage</button>}
@@ -333,9 +333,9 @@ export function Accounts({ data }: { data: MoneyData }) {
     );
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 lg:gap-5">
       {cards.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3">
           <Stat label="Owed on cards" value={money(cardOwed)} tone={cardOwed > 0 ? "bad" : undefined} />
           <Stat label="Total credit limit" value={cardLimit ? money(cardLimit) : "Not set"} />
           <Stat
@@ -496,7 +496,7 @@ export function Transactions({ data, categories }: { data: MoneyData; categories
   const totals = monthTotals(data, filterMonth);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 lg:gap-5">
       <StatementImport data={data} />
 
       <Card title="Log a transaction">
@@ -694,7 +694,7 @@ export function Budgets({ data, categories }: { data: MoneyData; categories: str
   const totalSpent = data.budgets.reduce((s, b) => s + (budgetSpent(data, b, month)), 0);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 lg:gap-5">
       <Card title="Set a monthly budget">
         <form onSubmit={add} className="grid gap-3 sm:grid-cols-[1fr_10rem_10rem_auto] sm:items-end">
           <Field label="Category">

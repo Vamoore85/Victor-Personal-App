@@ -135,7 +135,7 @@ export function Institutions({ data }: { data: MoneyData }) {
     .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 lg:gap-5">
       <VaultBar />
 
       <Card title={editingId ? "Edit institution" : "Add an institution"}>
@@ -234,7 +234,7 @@ export function Institutions({ data }: { data: MoneyData }) {
               const accounts = data.accounts.filter((a) => a.institutionId === inst.id);
               const bills = data.bills.filter((b) => b.institutionId === inst.id);
               return (
-                <section key={inst.id} className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+                <section key={inst.id} className="flex flex-col gap-3 rounded-xl border bg-surface border-zinc-200 p-3 sm:p-4 dark:border-zinc-800">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="font-medium">

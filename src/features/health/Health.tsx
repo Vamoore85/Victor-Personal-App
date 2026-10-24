@@ -151,7 +151,7 @@ function CheckIn({ data, date, setDate }: { data: Data; date: string; setDate: (
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <div className="grid gap-4 lg:gap-5 lg:grid-cols-2">
       <Card
         title="Daily check-in"
         action={<input type="date" className={`${inputClass} w-auto`} value={date} max={today()} onChange={(e) => e.target.value && setDate(e.target.value)} aria-label="Day" />}
@@ -312,7 +312,7 @@ function Habits({ data }: { data: Data }) {
 function Trends({ data }: { data: Data }) {
   const recent = [...data.logs].reverse().slice(0, 30);
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 lg:gap-5">
       <Card title="Weight, last 90 days">
         <WeightChart logs={data.logs} goal={data.goals.weight} />
       </Card>
@@ -388,7 +388,7 @@ export function Health() {
   const sessionsThisWeek = new Set(weekWorkouts.map((w) => w.date)).size;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 lg:gap-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Weight" value={latest ? `${latest.weight} lb` : "–"} />
         <Stat
@@ -397,7 +397,7 @@ export function Health() {
           tone={change === undefined || data.goals.weight === undefined || !latest ? undefined : Math.sign(change) === Math.sign(data.goals.weight - latest.weight!) ? "good" : "bad"}
         />
         <Stat label="Avg sleep, 7 days" value={avgSleep === undefined ? "–" : `${avgSleep.toFixed(1)} h`} tone={avgSleep === undefined ? undefined : avgSleep >= data.goals.sleep ? "good" : "bad"} />
-        <div className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
+        <div className="rounded-xl border bg-surface border-zinc-200 p-4 dark:border-zinc-800">
           <p className="text-xs uppercase tracking-wide text-zinc-500">Workout days this week</p>
           <p className="mt-1 text-2xl font-semibold tabular-nums">
             {sessionsThisWeek}

@@ -65,7 +65,7 @@ function ItemCard({ item, open, onToggle }: { item: Item; open: boolean; onToggl
   const perWear = item.cost !== undefined && item.worn.length ? item.cost / item.worn.length : undefined;
   const [cost, setCost] = useState(item.cost === undefined ? "" : String(item.cost));
   return (
-    <li className={`flex flex-col overflow-hidden rounded-xl border ${open ? "border-ember sm:col-span-2" : "border-zinc-200 dark:border-zinc-800"}`}>
+    <li className={`flex flex-col overflow-hidden rounded-xl border bg-surface ${open ? "border-ember sm:col-span-2" : "border-zinc-200 dark:border-zinc-800"}`}>
       {open ? (
         <div className="flex flex-col gap-3 p-4">
           <div className="flex gap-4">
@@ -168,13 +168,13 @@ function Closet({ data }: { data: Data }) {
   const notWorn = data.items.filter((i) => (lastWorn(i.worn) || "0") < cutoff.toISOString().slice(0, 10)).length;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 lg:gap-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         <Stat label="Pieces" value={String(data.items.length)} />
         <Stat label="Closet value" value={usd(value)} />
         <Stat label="Not worn in a year" value={String(notWorn)} />
       </div>
-      <form onSubmit={add} className="flex flex-wrap items-end gap-3 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+      <form onSubmit={add} className="flex flex-wrap items-end gap-3 rounded-xl border bg-surface border-zinc-200 p-3 sm:p-4 dark:border-zinc-800">
         <div className="min-w-48 flex-1">
           <Field label="Add to closet">
             <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="Navy blazer" />
@@ -237,8 +237,8 @@ function Outfits({ data }: { data: Data }) {
   const used = OCCASIONS.filter((o) => data.outfits.some((x) => x.occasion === o));
 
   return (
-    <div className="flex flex-col gap-6">
-      <form onSubmit={add} className="flex flex-wrap items-end gap-3 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+    <div className="flex flex-col gap-4 lg:gap-5">
+      <form onSubmit={add} className="flex flex-wrap items-end gap-3 rounded-xl border bg-surface border-zinc-200 p-3 sm:p-4 dark:border-zinc-800">
         <div className="min-w-48 flex-1">
           <Field label="New outfit">
             <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="Keynote look" />
@@ -266,7 +266,7 @@ function Outfits({ data }: { data: Data }) {
           const pieces = data.items.filter((i) => o.itemIds.includes(i.id));
           const isEditing = editing === o.id;
           return (
-            <li key={o.id} className={`flex flex-col gap-3 rounded-xl border p-4 ${isEditing ? "border-ember" : "border-zinc-200 dark:border-zinc-800"}`}>
+            <li key={o.id} className={`flex flex-col gap-3 rounded-xl border bg-surface p-4 ${isEditing ? "border-ember" : "border-zinc-200 dark:border-zinc-800"}`}>
               <div className="flex gap-4">
                 <PhotoPicker photo={o.photo} onChange={(photo) => patchOutfit(o.id, { photo })} label="Photo of the look" />
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -440,7 +440,7 @@ export function Style() {
   const [tab, setTab] = useState<(typeof TABS)[number]>("Closet");
   if (!data) return <p className="text-sm text-zinc-500">Loading…</p>;
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 lg:gap-5">
       <nav className="flex gap-2 overflow-x-auto">
         {TABS.map((t) => (
           <button key={t} onClick={() => setTab(t)} className={`shrink-0 ${tab === t ? buttonClass : ghostButtonClass}`}>

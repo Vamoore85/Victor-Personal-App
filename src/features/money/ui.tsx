@@ -1,19 +1,19 @@
 import type { ReactNode } from "react";
 
 export const inputClass =
-  "w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-ember dark:border-zinc-700";
+  "w-full min-w-0 rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-ember lg:py-1.5 dark:border-zinc-700";
 
 export const buttonClass =
-  "rounded-lg bg-brand px-4 py-2 text-sm font-medium text-on-brand hover:bg-brand-strong disabled:opacity-40";
+  "rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-on-brand hover:bg-brand-strong disabled:opacity-40 lg:py-1.5";
 
 export const ghostButtonClass =
   "rounded-lg border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900";
 
 export function Card({ title, children, action }: { title?: string; children: ReactNode; action?: ReactNode }) {
   return (
-    <section className="rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+    <section className="min-w-0 rounded-xl border border-zinc-200 bg-surface p-3 sm:p-4 dark:border-zinc-800">
       {(title || action) && (
-        <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           {title && <h2 className="font-medium">{title}</h2>}
           {action}
         </div>
@@ -36,9 +36,9 @@ export function Stat({ label, value, tone }: { label: string; value: string; ton
   const color =
     tone === "good" ? "text-emerald-600 dark:text-emerald-400" : tone === "bad" ? "text-rose-600 dark:text-rose-400" : "";
   return (
-    <div className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
-      <p className="text-xs uppercase tracking-wide text-zinc-500">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold tabular-nums ${color}`}>{value}</p>
+    <div className="min-w-0 rounded-xl border border-zinc-200 bg-surface p-3 dark:border-zinc-800">
+      <p className="text-[11px] uppercase tracking-wide text-zinc-500 sm:text-xs">{label}</p>
+      <p className={`mt-0.5 truncate text-xl font-semibold tabular-nums lg:text-2xl ${color}`}>{value}</p>
     </div>
   );
 }

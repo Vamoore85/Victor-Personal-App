@@ -214,9 +214,9 @@ export function Bills({ data, categories }: { data: MoneyData; categories: strin
   const accountNames = new Map(data.accounts.map((a) => [a.id, a.name]));
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 lg:gap-5">
       {data.bills.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3">
           <Stat label="Bills per month" value={money(monthly)} />
           <Stat label="Due in next 7 days" value={money(dueThisWeek)} />
           <Stat label="Overdue" value={String(overdue)} tone={overdue > 0 ? "bad" : undefined} />

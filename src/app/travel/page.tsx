@@ -6,9 +6,9 @@ export const metadata: Metadata = { title: "Travel & Vacation" };
 
 export default function TravelPage() {
   return (
-    <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-12">
+    <div>
       <PageHeader title="Travel & Vacation" subtitle="Trips, bookings, packing lists and the places you want to go." />
       <Travel />
-    </main>
+    </div>
   );
 }

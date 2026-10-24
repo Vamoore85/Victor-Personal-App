@@ -67,8 +67,8 @@ export function CommandCenter({ data, goTo, openBooks }: { data: MoneyData; goTo
     alerts.push({ text: `Estimated tax payment ${nextTax.label} is due ${shortDate(nextTax.due)} (${daysUntil(nextTax.due)} days).` });
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="flex flex-col gap-4 lg:gap-5">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Personal net worth" value={money(personal.cash - personal.debt)} tone={personal.cash - personal.debt >= 0 ? "good" : "bad"} />
         <Stat label="Business cash (net of debt)" value={money(businessCash)} />
         <Stat label={`Business profit ${year}`} value={money(companies.reduce((s, c) => s + c.ytd.netProfit, 0))} />

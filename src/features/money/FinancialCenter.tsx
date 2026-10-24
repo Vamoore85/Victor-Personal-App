@@ -101,10 +101,10 @@ export function FinancialCenter() {
 
   return (
     <ScopeContext.Provider value={view}>
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 lg:gap-5">
       <VaultAutoLock />
       <div className="flex flex-wrap items-center gap-3">
-        <div role="radiogroup" aria-label="Show" className="inline-flex rounded-full border border-zinc-300 p-0.5 dark:border-zinc-700">
+        <div role="radiogroup" aria-label="Show" className="inline-flex max-w-full overflow-x-auto rounded-full border border-zinc-300 bg-surface p-0.5 [scrollbar-width:none] dark:border-zinc-700">
           {([
             ["all", "All"],
             ["personal", "Personal"],
@@ -115,7 +115,7 @@ export function FinancialCenter() {
               role="radio"
               aria-checked={view === v}
               onClick={() => chooseView(v)}
-              className={`rounded-full px-4 py-1.5 text-sm ${
+              className={`shrink-0 rounded-full px-2.5 py-1.5 text-sm sm:px-4 ${
                 view === v ? "bg-brand font-medium text-on-brand" : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
               }`}
             >
@@ -123,15 +123,15 @@ export function FinancialCenter() {
             </button>
           ))}
         </div>
-        <span className="text-xs text-zinc-500">
+        <span className="hidden text-xs text-zinc-500 sm:inline">
           {view === "all"
             ? "Showing everything together"
             : `Showing ${COMPANIES.find((c) => c.value === view)?.legalName ?? "personal"} only`}
         </span>
         <CloudBadge state={cloud} />
       </div>
-      <nav className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex max-w-full gap-1 overflow-x-auto rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900">
+      <nav className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 gap-1 overflow-x-auto rounded-lg bg-zinc-200/60 p-1 [scrollbar-width:none] dark:bg-zinc-900">
           {TABS.map((t) => (
             <button
               key={t.id}
@@ -146,7 +146,15 @@ export function FinancialCenter() {
             </button>
           ))}
         </div>
-        <div className="flex gap-2">
+        {/* Backups: buttons on wider screens, tucked into a small menu on phones. */}
+        <details className="relative shrink-0 sm:hidden">
+          <summary className={`${ghostButtonClass} list-none whitespace-nowrap`}>Backup ▾</summary>
+          <div className="absolute right-0 z-20 mt-1 flex w-44 flex-col gap-1 rounded-lg border border-zinc-200 bg-surface p-1 shadow-lg dark:border-zinc-800">
+            <button className="rounded-md px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800" onClick={exportData}>Export backup</button>
+            <button className="rounded-md px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800" onClick={() => fileRef.current?.click()}>Import backup</button>
+          </div>
+        </details>
+        <div className="hidden gap-2 sm:flex">
           <button className={ghostButtonClass} onClick={exportData}>Export backup</button>
           <button className={ghostButtonClass} onClick={() => fileRef.current?.click()}>Import</button>
           <input

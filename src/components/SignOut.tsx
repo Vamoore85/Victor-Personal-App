@@ -1,15 +1,17 @@
 "use client";
 
-export function SignOut() {
+import type { ReactNode } from "react";
+
+export function SignOut({ className = "hover:text-brand", children = "Sign out" }: { className?: string; children?: ReactNode }) {
   return (
     <button
-      className="hover:text-brand"
+      className={className}
       onClick={async () => {
         await fetch("/api/logout", { method: "POST" }).catch(() => null);
         window.location.href = "/login";
       }}
     >
-      Sign out
+      {children}
     </button>
   );
 }

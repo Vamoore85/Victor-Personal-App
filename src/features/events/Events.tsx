@@ -63,7 +63,7 @@ function EventCard({ ev, speakers }: { ev: MavEvent; speakers: Speaker[] }) {
   const [open, setOpen] = useState(false);
   const linked = speakers.filter((s) => ev.speakerIds.includes(s.id));
   return (
-    <li className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
+    <li className="rounded-xl border bg-surface border-zinc-200 p-4 dark:border-zinc-800">
       <div className="flex items-start justify-between gap-3">
         <button className="min-w-0 text-left" onClick={() => setOpen(!open)}>
           <p className="font-medium">{ev.name}</p>
@@ -139,7 +139,7 @@ function SpeakerCard({ sp, events }: { sp: Speaker; events: MavEvent[] }) {
   const [open, setOpen] = useState(false);
   const at = events.filter((e) => e.speakerIds.includes(sp.id));
   return (
-    <li className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
+    <li className="rounded-xl border bg-surface border-zinc-200 p-4 dark:border-zinc-800">
       <button className="w-full text-left" onClick={() => setOpen(!open)}>
         <p className="font-medium">{sp.name}</p>
         <p className="text-xs text-zinc-500">
@@ -213,7 +213,7 @@ export function Events() {
   const speakers = [...data.speakers].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 lg:gap-5">
       <div className="flex gap-1 self-start rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900">
         {(["events", "speakers"] as const).map((k) => (
           <button
@@ -226,7 +226,7 @@ export function Events() {
         ))}
       </div>
 
-      <form onSubmit={add} className="flex flex-wrap items-end gap-3 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+      <form onSubmit={add} className="flex flex-wrap items-end gap-3 rounded-xl border bg-surface border-zinc-200 p-3 sm:p-4 dark:border-zinc-800">
         <div className="min-w-56 flex-1">
           <Field label={tab === "events" ? "New event" : "New speaker"}>
             <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder={tab === "events" ? "Leadership summit" : "Speaker's name"} />

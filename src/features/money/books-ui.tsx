@@ -126,7 +126,7 @@ export function Books({
         </p>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-4">
         <Stat label="Income" value={money(pl.income)} />
         <Stat label="Expenses" value={money(pl.cogs + pl.expenses)} />
         <Stat label="Net profit" value={money(pl.netProfit)} tone={pl.netProfit >= 0 ? "good" : "bad"} />
@@ -151,7 +151,7 @@ export function Books({
       </Card>
 
       <Card title={`Taxes to set aside · ${year} so far`}>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3">
           {sCorp ? (
             <Stat label="Self-employment tax" value="None (S-corp)" />
           ) : (

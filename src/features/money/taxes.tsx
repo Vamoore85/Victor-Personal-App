@@ -168,7 +168,7 @@ export function Taxes({ data }: { data: MoneyData }) {
   const small = "rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900";
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 lg:gap-5">
       <Card title="Upload tax documents">
         <p className="mb-4 text-sm text-zinc-500">
           Past returns, W-2s, 1099s, K-1s, estimated payments and IRS letters. Pick who they belong to and the tax year, then choose the

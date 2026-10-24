@@ -33,7 +33,7 @@ const STATUS_STYLE: Record<Status, string> = {
 
 function TopicView({ topic, onClose }: { topic: Topic; onClose: () => void }) {
   return (
-    <section className="flex flex-col gap-4 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+    <section className="flex flex-col gap-4 rounded-xl border bg-surface border-zinc-200 p-3 sm:p-4 dark:border-zinc-800">
       <div className="flex items-start justify-between gap-3">
         <input
           className="w-full bg-transparent text-xl font-semibold outline-none"
@@ -106,8 +106,8 @@ export function Research() {
   );
 
   return (
-    <div className="flex flex-col gap-6">
-      <form onSubmit={add} className="flex flex-wrap items-end gap-3 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+    <div className="flex flex-col gap-4 lg:gap-5">
+      <form onSubmit={add} className="flex flex-wrap items-end gap-3 rounded-xl border bg-surface border-zinc-200 p-3 sm:p-4 dark:border-zinc-800">
         <div className="min-w-56 flex-1">
           <Field label="New research topic">
             <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Best LLC setup for Maverick" />
@@ -130,7 +130,7 @@ export function Research() {
               <li key={t.id}>
                 <button
                   onClick={() => setOpenId(t.id)}
-                  className={`flex h-full w-full flex-col gap-2 rounded-xl border p-4 text-left hover:border-ember ${
+                  className={`flex h-full w-full flex-col gap-2 rounded-xl border bg-surface p-4 text-left hover:border-ember ${
                     t.id === openId ? "border-ember" : "border-zinc-200 dark:border-zinc-800"
                   }`}
                 >

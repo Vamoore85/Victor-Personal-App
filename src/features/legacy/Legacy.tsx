@@ -126,14 +126,14 @@ function LegacyEditor() {
   const filled = SECTIONS.filter((s) => (data.sections[s.id] ?? "").trim()).length;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 lg:gap-5">
       <p className="text-xs text-zinc-500">
         {filled} of {SECTIONS.length} sections filled in
         {saved === "saving" ? " · Saving…" : saved === "saved" ? " · Saved and encrypted" : ""}
       </p>
 
       {SECTIONS.map((s) => (
-        <section key={s.id} className="rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+        <section key={s.id} className="rounded-xl border bg-surface border-zinc-200 p-3 sm:p-4 dark:border-zinc-800">
           <h2 className="font-medium">{s.title}</h2>
           <p className="mb-3 mt-1 text-sm text-zinc-500">{s.prompt}</p>
           <textarea
@@ -147,7 +147,7 @@ function LegacyEditor() {
         </section>
       ))}
 
-      <section className="rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+      <section className="rounded-xl border bg-surface border-zinc-200 p-3 sm:p-4 dark:border-zinc-800">
         <h2 className="font-medium">Documents</h2>
         <p className="mb-3 mt-1 text-sm text-zinc-500">
           Scans or photos of the signed will, power of attorney, advance directive, insurance policies, deeds. Encrypted
@@ -187,7 +187,7 @@ function LegacyEditor() {
 export function Legacy() {
   const vault = useVault();
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 lg:gap-5">
       <VaultAutoLock />
       <aside className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200">
         <p className="font-medium">This page is not a will.</p>

@@ -1,6 +1,6 @@
+import Link from "next/link";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { PageHeader } from "@/components/PageHeader";
 import { TRUST_CONTACT_EMAIL } from "@/config/app";
 
 export const metadata: Metadata = {
@@ -21,8 +21,14 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 export default function TrustPage() {
   return (
-    <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-12">
-      <PageHeader title="Privacy & Security" subtitle={`How financial data is collected, used and protected. Effective ${EFFECTIVE}.`} />
+    <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-8 sm:px-6 lg:py-12">
+      <header className="mb-8">
+        <Link href="/" className="text-sm text-zinc-500 hover:text-brand">
+          Maverick Personal
+        </Link>
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight">Privacy &amp; Security</h1>
+        <p className="mt-1 text-sm text-zinc-500">How financial data is collected, used and protected. Effective {EFFECTIVE}.</p>
+      </header>
       <div className="flex flex-col gap-10 leading-relaxed">
         <Section title="About this app">
           <p>

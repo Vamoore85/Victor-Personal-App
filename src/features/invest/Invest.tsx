@@ -44,7 +44,7 @@ function GoalCard({ goal }: { goal: Goal }) {
   }
 
   return (
-    <section className={`flex flex-col gap-4 rounded-xl border p-5 ${goal.done ? "border-emerald-500/50" : "border-zinc-200 dark:border-zinc-800"}`}>
+    <section className={`flex flex-col gap-4 rounded-xl border bg-surface p-3 sm:p-4 ${goal.done ? "border-emerald-500/50" : "border-zinc-200 dark:border-zinc-800"}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium uppercase tracking-wide text-brand">{goal.area}</p>
@@ -160,8 +160,8 @@ export function Invest() {
   const achieved = data.goals.filter((g) => g.done).length;
 
   return (
-    <div className="flex flex-col gap-6">
-      <form onSubmit={add} className="grid gap-3 rounded-xl border border-zinc-200 p-5 sm:grid-cols-[1fr_10rem_11rem_auto] sm:items-end dark:border-zinc-800">
+    <div className="flex flex-col gap-4 lg:gap-5">
+      <form onSubmit={add} className="grid gap-3 rounded-xl border bg-surface border-zinc-200 p-3 sm:p-4 sm:grid-cols-[1fr_10rem_11rem_auto] sm:items-end dark:border-zinc-800">
         <Field label="New goal">
           <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Read 12 business books this year" />
         </Field>
@@ -198,7 +198,7 @@ export function Invest() {
           Add your first goal above. Then drag in the books, video clips and links that will get you there.
         </p>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid gap-4 lg:gap-5 lg:grid-cols-2">
           {shown.map((g) => (
             <GoalCard key={g.id} goal={g} />
           ))}

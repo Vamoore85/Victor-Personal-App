@@ -226,7 +226,7 @@ function TripView({ trip, onClose }: { trip: Trip; onClose: () => void }) {
   const spent = booked(trip);
   const [budget, setBudget] = useState(trip.budget === undefined ? "" : String(trip.budget));
   return (
-    <section className="flex flex-col gap-5 rounded-xl border border-ember p-5">
+    <section className="flex flex-col gap-5 rounded-xl border bg-surface border-ember p-3 sm:p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <input className="w-full bg-transparent text-xl font-semibold outline-none" value={trip.name} onChange={(e) => patchTrip(trip.id, { name: e.target.value })} aria-label="Trip name" />
@@ -327,7 +327,7 @@ function TripCard({ trip, active, onOpen }: { trip: Trip; active: boolean; onOpe
   const cd = countdown(trip);
   return (
     <li>
-      <button onClick={onOpen} className={`flex h-full w-full flex-col gap-1 rounded-xl border p-4 text-left hover:border-ember ${active ? "border-ember" : "border-zinc-200 dark:border-zinc-800"}`}>
+      <button onClick={onOpen} className={`flex h-full w-full flex-col gap-1 rounded-xl border bg-surface p-4 text-left hover:border-ember ${active ? "border-ember" : "border-zinc-200 dark:border-zinc-800"}`}>
         <span className="flex items-start justify-between gap-2">
           <span className="font-medium">{trip.name}</span>
           <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] ${STATUS_STYLE[trip.status]}`}>{trip.status}</span>
@@ -453,9 +453,9 @@ export function Travel() {
     );
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 lg:gap-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-        <div className="col-span-2 rounded-xl border border-zinc-200 p-4 lg:col-span-1 dark:border-zinc-800">
+        <div className="col-span-2 rounded-xl border bg-surface border-zinc-200 p-4 lg:col-span-1 dark:border-zinc-800">
           <p className="text-xs uppercase tracking-wide text-zinc-500">Next trip</p>
           {next ? (
             <button className="mt-1 text-left" onClick={() => setOpenId(next.id)}>
@@ -488,7 +488,7 @@ export function Travel() {
         />
       ) : (
         <>
-          <form onSubmit={add} className="flex flex-wrap items-end gap-3 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+          <form onSubmit={add} className="flex flex-wrap items-end gap-3 rounded-xl border bg-surface border-zinc-200 p-3 sm:p-4 dark:border-zinc-800">
             <div className="min-w-56 flex-1">
               <Field label="New trip or vacation">
                 <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="Summer in Miami" />

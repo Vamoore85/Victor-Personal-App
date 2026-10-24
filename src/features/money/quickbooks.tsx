@@ -191,7 +191,7 @@ export function QuickBooksPanel({ year, notice }: { year: number; notice?: strin
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 lg:gap-5">
       <Card
         title={`From QuickBooks: ${status.companyName ?? "Gladiator"}`}
         action={
@@ -223,7 +223,7 @@ export function QuickBooksPanel({ year, notice }: { year: number; notice?: strin
         )}
       </Card>
       {report && report.year === year && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 lg:gap-5 lg:grid-cols-2">
           <ReportTable title={`Profit and loss ${year}`} lines={report.pl} />
           <ReportTable title={`Balance sheet as of ${report.balanceAsOf}`} lines={report.balanceSheet} />
         </div>
