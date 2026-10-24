@@ -113,6 +113,9 @@ export async function plaid<T>(creds: PlaidCreds, path: string, body: Record<str
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ client_id: creds.clientId, secret: creds.secret, ...body }),
     cache: "no-store",
+    signal: AbortSignal.timeout(path === "/link/token/create" ? 15_000 : 45_000),
+  }).catch((e) => {
+    throw new PlaidError((e as Error).name === "TimeoutError" ? "Plaid didn't answer in time. Try again." : "Couldn't reach Plaid. Try again.", "PLAID_UNREACHABLE", 504);
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {

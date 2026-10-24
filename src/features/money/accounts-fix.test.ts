@@ -203,3 +203,39 @@ test("a database already on rules version 1 gets the version 2 names without red
   assert.equal(data.accounts.find((a) => a.id === "a5668")!.needsEntity, true);
   assert.equal(data.accountRules, 4);
 });
+
+test("reconnecting ··5443 through the existing connection updates its record, keeps its history, makes no copy", () => {
+  const start = production();
+  // Its old bank connection is gone (the record still points at it).
+  start.accounts = start.accounts.map((a) => (a.id === "a5443" ? { ...a, plaid: { linkId: "Lgone", accountId: "Lgone-5443" } } : a));
+  const d = cleanAccounts(start).data;
+  const before = d.accounts.length;
+  const l0 = d.bankLinks.find((l) => l.id === "L0")!;
+  // Update mode with account selection: the same connection now also shares ··5443.
+  const next = cleanAccounts(
+    applySync(d, l0, {
+      cursor: "c4",
+      hasMore: false,
+      updateStatus: "HISTORICAL_UPDATE_COMPLETE",
+      institution: "M&T Bank",
+      accounts: ["5105", "5815", "5249", "5443"].map((m) => ({ id: `L0-${m}`, name: `Account ${m}`, mask: m, type: "depository", subtype: "checking", current: 7, available: 7 })),
+      added: [
+        { id: "z1", accountId: "L0-5443", amount: 66, date: "2026-09-02", name: "Payee 66", pending: false, category: "" }, // already here from the old connection
+        { id: "z2", accountId: "L0-5443", amount: 77, date: "2026-10-23", name: "Payee 77", pending: false, category: "" },
+      ],
+      modified: [],
+      removed: [],
+    }),
+  ).data;
+  assert.equal(next.accounts.length, before);
+  const m = next.accounts.filter((a) => a.last4 === "5443");
+  assert.equal(m.length, 1);
+  assert.equal(m[0].id, "a5443");
+  assert.equal(m[0].scope, "business");
+  assert.ok(!m[0].needsEntity);
+  assert.equal(m[0].plaid?.linkId, "L0");
+  const tx = next.transactions.filter((t) => t.accountId === "a5443");
+  assert.equal(tx.length, 3); // statement line, old bank line (not doubled), new bank line
+  const mav = balances(next).find((b) => b.entity === "business")!;
+  assert.equal(mav.available, 7);
+});

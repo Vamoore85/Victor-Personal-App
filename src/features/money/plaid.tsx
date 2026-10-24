@@ -23,7 +23,8 @@ declare global {
       create: (opts: {
         token: string;
         onSuccess: (publicToken: string) => void;
-        onExit: (err: { display_message?: string; error_message?: string } | null) => void;
+        onExit: (err: { display_message?: string; error_message?: string; error_code?: string } | null) => void;
+        onEvent?: (eventName: string) => void;
       }) => PlaidHandler;
     };
   }
@@ -56,51 +57,113 @@ function savedKeys(): SavedKeys | null {
   }
 }
 
-async function api<T>(path: string, body?: Record<string, unknown>): Promise<T> {
+async function api<T>(path: string, body?: Record<string, unknown>, timeoutMs?: number): Promise<T> {
   const payload = body === undefined ? undefined : { keys: savedKeys()?.keys, ...body };
+  const ctl = timeoutMs ? new AbortController() : undefined;
+  const timer = ctl && setTimeout(() => ctl.abort(), timeoutMs);
   const res = await fetch(`/api/plaid/${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers: { "Content-Type": "application/json" },
     body: payload === undefined ? undefined : JSON.stringify(payload),
-  });
+    signal: ctl?.signal,
+  })
+    .catch((e) => {
+      throw new Error((e as Error).name === "AbortError" ? "The bank connection service didn't answer. Try again." : "Couldn't reach the bank connection service. Check your internet and try again.");
+    })
+    .finally(() => timer && clearTimeout(timer));
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(json.error || "Couldn't reach the bank connection service."), { code: json.code });
   return json as T;
 }
 
 let scriptPromise: Promise<void> | null = null;
-function loadPlaidScript() {
-  scriptPromise ??= new Promise((resolve, reject) => {
-    const s = document.createElement("script");
-    s.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
-    s.onload = () => resolve();
-    s.onerror = () => {
+/** Loads Plaid's sign-in window code; gives up (so it can be tried again) if it hasn't loaded in 20 seconds. */
+export function loadPlaidScript() {
+  if (typeof window !== "undefined" && window.Plaid) return Promise.resolve();
+  scriptPromise ??= new Promise<void>((resolve, reject) => {
+    const fail = (msg: string) => {
       scriptPromise = null;
-      reject(new Error("Couldn't load Plaid. Check your internet connection."));
+      s.remove();
+      reject(new Error(msg));
+    };
+    const s = document.createElement("script");
+    const timer = setTimeout(() => fail("Plaid's sign-in window took too long to load. Try again."), 20_000);
+    s.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
+    s.onload = () => {
+      clearTimeout(timer);
+      if (window.Plaid) resolve();
+      else fail("Plaid's sign-in window couldn't start in this browser. Try again, or try another browser.");
+    };
+    s.onerror = () => {
+      clearTimeout(timer);
+      fail("Couldn't load Plaid. Check your internet connection and try again.");
     };
     document.head.appendChild(s);
   });
   return scriptPromise;
 }
 
-/** Opens Plaid Link and resolves with the public token, or null if closed. */
-async function openLink(linkToken: string) {
-  await loadPlaidScript();
+/** Where opening the bank's window is up to, for the button's label. */
+export type LinkStep = "token" | "script" | "window";
+
+/** Tells the server how far opening the bank's window got when it fails, so it shows in the site's logs (no account details). */
+function report(stage: string, code?: string) {
+  void fetch("/api/plaid/report", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage, code }) }).catch(() => {});
+}
+
+/**
+ * Opens Plaid Link and resolves with the public token, or null if you closed it.
+ * Never hangs: if Plaid's window hasn't appeared after 25 seconds it is closed
+ * and this fails with a message, so the button can offer to try again.
+ */
+async function openLink(linkToken: string, onStep?: (s: LinkStep) => void) {
+  onStep?.("script");
+  try {
+    await loadPlaidScript();
+  } catch (e) {
+    report("script");
+    throw e;
+  }
+  onStep?.("window");
   return new Promise<string | null>((resolve, reject) => {
+    let shown = false;
+    let done = false;
+    const finish = (fn: () => void) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        handler.destroy();
+      } catch {}
+      fn();
+    };
+    const timer = setTimeout(() => {
+      if (shown) return;
+      report("window", "TIMEOUT");
+      finish(() => reject(new Error("Plaid's window didn't open. Try again; if it keeps happening, allow pop-ups and turn off content blockers for this site.")));
+    }, 25_000);
     const handler = window.Plaid!.create({
       token: linkToken,
-      onSuccess: (publicToken) => {
-        handler.destroy();
-        resolve(publicToken);
+      onEvent: (name) => {
+        if (name === "OPEN" || name === "TRANSITION_VIEW" || name === "SELECT_INSTITUTION") shown = true;
       },
+      onSuccess: (publicToken) => finish(() => resolve(publicToken)),
       onExit: (err) => {
-        handler.destroy();
-        if (err) reject(new Error(err.display_message || err.error_message || "The bank connection didn't finish."));
-        else resolve(null);
+        if (err) report("exit", err.error_code);
+        finish(() => (err ? reject(new Error(err.display_message || (err.error_message ? `Plaid stopped: ${err.error_message}. Try again.` : "The bank connection didn't finish. Try again."))) : resolve(null)));
       },
     });
     handler.open();
   });
+}
+
+async function linkToken(body: Record<string, unknown>) {
+  try {
+    return (await api<{ linkToken: string }>("link-token", body, 20_000)).linkToken;
+  } catch (e) {
+    report("token", (e as Error & { code?: string }).code);
+    throw e;
+  }
 }
 
 /**
@@ -109,9 +172,9 @@ async function openLink(linkToken: string) {
  * accounts already here with the same last 4 digits are taken over, so their
  * history and company stay as they are.
  */
-export async function connectBank(scope: Scope): Promise<string> {
-  const { linkToken } = await api<{ linkToken: string }>("link-token", {});
-  const publicToken = await openLink(linkToken);
+export async function connectBank(scope: Scope, onStep?: (s: LinkStep) => void): Promise<string> {
+  onStep?.("token");
+  const publicToken = await openLink(await linkToken({}), onStep);
   if (!publicToken) return "";
   const id = newId();
   const { itemId, link } = await api<{ itemId: string; link: string }>("exchange", { publicToken, id, scope });
@@ -128,9 +191,9 @@ export async function connectBank(scope: Scope): Promise<string> {
  * copied; the newly shared accounts then sync into the records already here
  * (matched by last 4 digits), keeping their company and history.
  */
-export async function addAccountsToBank(link: BankLink): Promise<boolean> {
-  const { linkToken } = await api<{ linkToken: string }>("link-token", { link: link.link, addAccounts: true });
-  if (!(await openLink(linkToken))) return false;
+export async function addAccountsToBank(link: BankLink, onStep?: (s: LinkStep) => void): Promise<boolean> {
+  onStep?.("token");
+  if (!(await openLink(await linkToken({ link: link.link, addAccounts: true }), onStep))) return false;
   await syncLink({ ...link, error: undefined });
   return true;
 }

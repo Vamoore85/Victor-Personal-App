@@ -5,10 +5,11 @@ import { applyScan, detectRecurring, SCAN_RULES } from "./bill-intel";
 import { addDays, money, today } from "./calc";
 import { ago } from "./intel-shared";
 import { CONFIDENCE_LABEL, ENTITIES, balances, type AccountLine, cadenceWord, entityLabel, total, transactionRows, upcoming, type Confidence, type EntityBalance, type TxnRow, type UpcomingLine } from "./outlook";
-import { addAccountsToBank, connectBank, syncAll, useSyncActivity } from "./plaid";
+import { addAccountsToBank, connectBank, loadPlaidScript, syncAll, useSyncActivity, type LinkStep } from "./plaid";
 import { freshness } from "./briefing";
 import { getMoneyData, newId, setMoneyData } from "./store";
-import type { MoneyData } from "./types";
+import type { Account, MoneyData, Scope } from "./types";
+import { accountLabel, assignEntity } from "./accounts-fix";
 
 /*
  * The Money overview: balances, then upcoming bills, then transactions, all
@@ -63,7 +64,7 @@ export function Overview({ data, onSettings }: { data: MoneyData; onSettings: ()
   const anyBalance = bal.some((b) => b.counted > 0);
   const txns = transactionRows(data, query);
   const hasBankTxns = data.transactions.some((t) => t.plaidId);
-  const unassigned = data.accounts.filter((a) => a.needsEntity && !(a.plaid && data.bankLinks.find((l) => l.id === a.plaid!.linkId)?.duplicateOf)).length;
+  const unassignedAccts = data.accounts.filter((a) => a.needsEntity && !(a.plaid && data.bankLinks.find((l) => l.id === a.plaid!.linkId)?.duplicateOf));
 
   return (
     <div className="flex flex-col gap-5 lg:gap-6" data-testid="outlook">
@@ -119,16 +120,7 @@ export function Overview({ data, onSettings }: { data: MoneyData; onSettings: ()
         </div>
       )}
 
-      {unassigned > 0 && (
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm" data-testid="needs-assignment">
-          <p className="min-w-0 flex-1">
-            {unassigned} account{unassigned === 1 ? " has" : "s have"} no company yet, so {unassigned === 1 ? "it isn't" : "they aren't"} counted below.
-          </p>
-          <button className="rounded-full bg-brand px-4 py-1.5 text-sm font-medium text-on-brand" onClick={onSettings}>
-            Assign accounts
-          </button>
-        </div>
-      )}
+      {unassignedAccts.length > 0 && <AssignTray accounts={unassignedAccts} />}
 
       {/* Three permanent panels, the same order inside each: balance, upcoming bills, transactions */}
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3 lg:gap-5">
@@ -150,6 +142,46 @@ export function Overview({ data, onSettings }: { data: MoneyData; onSettings: ()
 }
 
 /** One account or card: the bank's balance with its time, or exactly why there isn't one. */
+const CHOICES: { id: Scope; label: string }[] = [
+  { id: "personal", label: "Personal" },
+  { id: "business", label: "Maverick" },
+  { id: "gladiator", label: "Gladiator" },
+];
+
+/** Accounts with no company yet, named one by one, with the company buttons right here. */
+function AssignTray({ accounts }: { accounts: Account[] }) {
+  return (
+    <section className="rounded-2xl border-2 border-amber-400 bg-amber-50 p-4 dark:border-amber-600 dark:bg-amber-950/40" data-testid="needs-assignment" aria-label="Assign accounts">
+      <h3 className="text-lg font-semibold text-amber-900 dark:text-amber-200">
+        Assign {accounts.length === 1 ? "this account" : `these ${accounts.length} accounts`} to a company
+      </h3>
+      <p className="text-sm text-amber-900/80 dark:text-amber-200/80">Until you pick one, {accounts.length === 1 ? "it isn't" : "they aren't"} counted in any company&apos;s totals.</p>
+      <ul className="mt-3 flex flex-col gap-3">
+        {accounts.map((a) => (
+          <li key={a.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" data-testid={`assign-${a.last4 ?? a.id}`}>
+            <span className="text-base font-medium">
+              {accountLabel(a)}
+              {a.last4 && !accountLabel(a).includes(a.last4) && ` ··${a.last4}`}
+              <span className="ml-2 text-sm font-normal text-zinc-500">{a.type === "credit" ? "card" : a.type}</span>
+            </span>
+            <span className="flex gap-2">
+              {CHOICES.map((c) => (
+                <button
+                  key={c.id}
+                  className="rounded-full border border-zinc-300 bg-surface px-4 py-1.5 text-sm font-medium hover:border-brand hover:text-brand dark:border-zinc-700"
+                  onClick={() => setMoneyData((d) => assignEntity(d, a.id, c.id))}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function AccountRow({ a, card, onConnect }: { a: AccountLine; card?: boolean; onConnect: () => void }) {
   const why =
     a.state === "waiting"
@@ -171,7 +203,6 @@ function AccountRow({ a, card, onConnect }: { a: AccountLine; card?: boolean; on
             {a.name}
             {a.last4 && ` ··${a.last4}`}
           </span>
-          {a.bankName && <span className="block truncate text-[11px] text-zinc-400">{a.bankName}</span>}
         </span>
         <span className="flex shrink-0 flex-col items-end tabular-nums">
           {a.amount === null ? (
@@ -213,41 +244,47 @@ function EntityPanel({
   const due7 = total(lines, undefined, 7);
   const due30 = total(lines, undefined, 30);
   const in7 = lines.some((l) => l.date <= addDays(today(), 6));
-  const [connecting, setConnecting] = useState(false);
+  const [step, setStep] = useState<LinkStep | null>(null);
+  const connecting = step !== null;
   const [connectError, setConnectError] = useState("");
   // Bank history, but no live connection feeding any of this company's accounts.
   const all = [...b.accounts, ...b.cards];
   const missing = all.filter((a) => a.state === "lost" || a.state === "unlinked");
   const needsConnection = b.counted === 0 && missing.length > 0;
   const lost = all.some((a) => a.state === "lost");
-  async function reconnect() {
+  // Load Plaid's window code ahead of time so the button opens it quickly.
+  useEffect(() => {
+    if (needsConnection) loadPlaidScript().catch(() => {});
+  }, [needsConnection]);
+  async function reconnect(otherLogin = false) {
+    if (connecting) return;
     setConnectError("");
-    setConnecting(true);
+    setStep("token");
     try {
-      // Add the missing account to the bank connection you already have; only connect anew if there is none.
+      // First choice: tick the account in the bank connection you already have (no new connection, no copies).
+      // Only for an account under a different bank login is a new connection made. Either way the
+      // bank's account is matched to this record by its last 4 digits, so its history and company stay.
       const d = getMoneyData();
       const live = d?.bankLinks.find((l) => !l.duplicateOf && !l.errorCode);
-      if (live) await addAccountsToBank(live);
-      else await connectBank(b.entity);
+      if (live && !otherLogin) await addAccountsToBank(live, setStep);
+      else await connectBank(b.entity, setStep);
     } catch (e) {
-      setConnectError((e as Error).message);
+      setConnectError((e as Error).message || "Something went wrong opening your bank. Try again.");
     } finally {
-      setConnecting(false);
+      setStep(null);
     }
   }
   return (
     <section className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-surface dark:border-zinc-800" data-testid={`panel-${b.entity}`} aria-label={entityLabel(b.entity)}>
       {/* Balance */}
       <div className="flex flex-col gap-1 p-4 sm:p-5">
-        <h3 className="text-sm font-medium text-zinc-500">{entityLabel(b.entity)}</h3>
+        <h3 className="text-2xl font-bold tracking-tight">{entityLabel(b.entity)}</h3>
         <p className="text-3xl font-semibold tabular-nums tracking-tight" data-testid={`bal-${b.entity}`}>{b.counted ? money(b.available) : "—"}</p>
         <p className="text-xs text-zinc-500" data-testid={`bal-note-${b.entity}`}>
           {b.counted
-            ? `Cash available${b.asOf ? ` · bank balance ${ago(b.asOf)}` : ""}${b.stale ? ` · ${b.stale} account${b.stale === 1 ? "" : "s"} without a balance` : ""}`
+            ? `Cash${b.asOf ? `, updated ${ago(b.asOf)}` : ""}${b.stale ? ` · ${b.stale} account${b.stale === 1 ? "" : "s"} without a balance` : ""}`
             : needsConnection
-              ? lost
-                ? `${entityLabel(b.entity)} has bank history, but no live bank connection, so there is no current balance.`
-                : `${entityLabel(b.entity)}'s accounts aren't connected to a bank, so there is no current balance.`
+              ? "No live bank connection, so no current balance. Its history is kept."
               : b.accounts.length
                 ? "Waiting for the bank's balance"
                 : "No checking or savings account"}
@@ -255,12 +292,28 @@ function EntityPanel({
         {needsConnection && (
           <div className="mt-2 flex flex-col gap-1" data-testid={`reconnect-${b.entity}`}>
             <button className="self-start rounded-full bg-brand px-4 py-1.5 text-sm font-medium text-on-brand disabled:opacity-60" onClick={() => void reconnect()} disabled={connecting}>
-              {connecting ? "Connecting…" : lost ? "Reconnect bank" : "Connect bank"}
+              {step === "token" ? "Getting a secure link…" : step === "script" ? "Loading Plaid…" : step === "window" ? "Opening your bank's window…" : connectError ? "Try again" : `Add ${missing.length === 1 && missing[0].last4 ? `··${missing[0].last4}` : "account"} from your bank`}
             </button>
-            {connectError && <p className="text-xs text-rose-600 dark:text-rose-400">{connectError}</p>}
+            <p className="text-xs text-zinc-500">
+              Tick {missing.length === 1 && missing[0].last4 ? `the account ending ${missing[0].last4}` : "it"} when the bank lists your accounts. Not listed?{" "}
+              <button className="underline hover:text-zinc-900 dark:hover:text-zinc-100" onClick={() => void reconnect(true)} disabled={connecting}>
+                It&apos;s under a different bank login
+              </button>
+            </p>
+            {connectError && (
+              <p className="text-sm text-rose-600 dark:text-rose-400" role="alert" data-testid={`reconnect-error-${b.entity}`}>
+                {connectError}
+              </p>
+            )}
           </div>
         )}
-        {b.accounts.length > 0 && (
+        {/* One account whose row would only repeat the figure (or the reconnect note) above is named once instead. */}
+        {b.accounts.length === 1 && (needsConnection || b.accounts[0].state === "bank") ? (
+          <p className="text-sm text-zinc-500" data-testid={`accts-${b.entity}`}>
+            {b.accounts[0].name}
+            {b.accounts[0].last4 && !b.accounts[0].name.includes(b.accounts[0].last4) && ` ··${b.accounts[0].last4}`}
+          </p>
+        ) : b.accounts.length > 0 && (
           <ul className="mt-2 flex flex-col gap-1 text-xs text-zinc-500" data-testid={`accts-${b.entity}`}>
             {b.accounts.map((a, i) => (
               <AccountRow key={i} a={a} onConnect={() => void reconnect()} />
