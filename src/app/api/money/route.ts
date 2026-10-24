@@ -70,7 +70,7 @@ export async function GET(req: Request) {
         console.log(`money clean-up: accounts ${fix.before} -> ${fix.after}, merged=${fix.merged}, unassigned=${fix.unassigned}, corrected=${fix.corrected.join(",") || "none"}, saved=${saved.ok}`);
       }
       console.log(`money accounts: ${accountDiag(doc.data)}`);
-      console.log(`money bills check: ${billDiag(doc.data)}`);
+      for (const line of billDiag(doc.data).split("\n")) console.log(`money bills check: ${line}`);
     }
     return packed({ configured: true, rev: doc?.rev ?? 0, data: doc?.data ?? null });
   } catch (e) {

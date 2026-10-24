@@ -99,6 +99,17 @@ export function billDiag(data: unknown) {
     g.days.add(+t.date.slice(8, 10));
     big.set(k, g);
   }
+  // Every check: why it is or isn't looked at, per account; for Personal, size band and day of month.
+  const why = new Map<string, number>();
+  for (const t of d.transactions) {
+    if (!/^CHECK|CHECK ?#|CHECK NUMBER|\bCHK\b/i.test(t.description)) continue;
+    const a = acct.get(t.accountId);
+    const r = t.kind !== "expense" ? "money-in" : isCandidate(t, "out") ? "ok" : t.transferId ? `transferId-${t.transferId === "imported" ? "imported" : "pair"}` : /DEPOSIT|REFUND|REVERSAL|RETURN|FROM/i.test(t.description) ? "deposit-word" : "other";
+    const band = (a?.scope ?? "personal") === "personal" ? `/${t.amount < 1000 ? "<1k" : t.amount < 1500 ? "1-1.5k" : t.amount < 2500 ? "1.5-2.5k" : "2.5k+"}/d${t.date.slice(8, 10)}/${t.date.slice(0, 7)}` : "";
+    const k = `${a?.last4}:${r}${band}`;
+    why.set(k, (why.get(k) ?? 0) + 1);
+  }
+  out.push(`checks-why: ${[...why].sort().map(([k, v]) => `${k}=${v}`).join(", ")}`);
   out.push(`personal-big: ${[...big].sort((a, b) => b[1].n - a[1].n).slice(0, 12).map(([k, g]) => `${k}:n${g.n}/m${g.months.size}/days${[...g.days].sort((x, y) => x - y).join(".")}`).join(", ") || "none"}`);
-  return out.join(" || ") + ` | scan=${d.billScan ? `${d.billScan.found}@${d.billScan.windowEnd}/rules${d.billScan.rules}` : "none"} recurring=${d.recurring.length}`;
+  return out.join("\n") + `\nscan=${d.billScan ? `${d.billScan.found}@${d.billScan.windowEnd}/rules${d.billScan.rules}` : "none"} recurring=${d.recurring.length}`;
 }
