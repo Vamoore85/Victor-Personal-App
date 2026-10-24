@@ -39,6 +39,8 @@ function normalize(value: unknown): MoneyData {
     taxDocs: Array.isArray(v.taxDocs) ? v.taxDocs : [],
     recurring: Array.isArray(v.recurring) ? v.recurring : [],
     billScan: v.billScan && typeof v.billScan === "object" ? v.billScan : undefined,
+    // Which account clean-up rules already ran (accounts-fix.ts); dropping it would rerun them on every save.
+    accountRules: typeof v.accountRules === "number" ? v.accountRules : undefined,
     docImports: Array.isArray(v.docImports) ? v.docImports : [],
     briefings: Array.isArray(v.briefings) ? v.briefings : [],
   };

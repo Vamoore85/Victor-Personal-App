@@ -3,7 +3,7 @@ import { connection } from "next/server";
 import { databaseUrl, dbConfigured, readDoc, writeDoc } from "@/lib/db";
 import { applyPendingImport } from "@/lib/pending-import";
 import { accountDiag, asMoney } from "@/lib/money-doc";
-import { cleanAccounts } from "@/features/money/accounts-fix";
+import { ACCOUNT_RULES, cleanAccounts } from "@/features/money/accounts-fix";
 import { sameOrigin, signedIn } from "@/lib/plaid-server";
 
 // Cloud copy of the Financial Center. The browser keeps a local copy too and
@@ -94,6 +94,10 @@ export async function PUT(req: Request) {
     return Response.json({ error: "Bad request." }, { status: 400 });
   }
   try {
+    // A save only lands on the latest copy (rev check), which the clean-up rules already ran on.
+    // Older app code didn't carry that marker; keep it, or the rules would run again on the next load.
+    const data = body.data as { accountRules?: unknown };
+    if (typeof data.accountRules !== "number") data.accountRules = ACCOUNT_RULES;
     const result = await writeDoc(KEY, body.rev, body.data);
     if (!result.ok) return Response.json({ conflict: true, rev: result.current.rev, data: result.current.data }, { status: 409 });
     return Response.json({ rev: result.rev });
