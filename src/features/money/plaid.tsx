@@ -8,6 +8,8 @@ import { Card, Empty, buttonClass, ghostButtonClass } from "./ui";
 import { HISTORY_DONE, saveBriefing } from "./briefing";
 import { setMode } from "./intel-shared";
 import { assignEntity } from "./accounts-fix";
+import { checkPicked, runLink, type LinkStep, type PlaidFactory } from "./plaid-link";
+export type { LinkStep } from "./plaid-link";
 
 /*
  * Connect banks and cards through Plaid. Plaid Link (Plaid's own sign-in
@@ -16,17 +18,9 @@ import { assignEntity } from "./accounts-fix";
  * are stored with the rest of the money data in this browser.
  */
 
-type PlaidHandler = { open: () => void; destroy: () => void };
 declare global {
   interface Window {
-    Plaid?: {
-      create: (opts: {
-        token: string;
-        onSuccess: (publicToken: string) => void;
-        onExit: (err: { display_message?: string; error_message?: string; error_code?: string } | null) => void;
-        onEvent?: (eventName: string) => void;
-      }) => PlaidHandler;
-    };
+    Plaid?: PlaidFactory;
   }
 }
 
@@ -76,95 +70,57 @@ async function api<T>(path: string, body?: Record<string, unknown>, timeoutMs?: 
   return json as T;
 }
 
-let scriptPromise: Promise<void> | null = null;
-/** Loads Plaid's sign-in window code; gives up (so it can be tried again) if it hasn't loaded in 20 seconds. */
-export function loadPlaidScript() {
-  if (typeof window !== "undefined" && window.Plaid) return Promise.resolve();
-  scriptPromise ??= new Promise<void>((resolve, reject) => {
+let scriptPromise: Promise<PlaidFactory> | null = null;
+/** Loads Plaid's script and waits until Plaid is ready; gives up after 20 seconds so it can be tried again. */
+export function loadPlaidScript(): Promise<PlaidFactory> {
+  if (typeof window !== "undefined" && window.Plaid) return Promise.resolve(window.Plaid);
+  scriptPromise ??= new Promise<PlaidFactory>((resolve, reject) => {
+    const s = document.createElement("script");
     const fail = (msg: string) => {
       scriptPromise = null;
       s.remove();
       reject(new Error(msg));
     };
-    const s = document.createElement("script");
-    const timer = setTimeout(() => fail("Plaid's sign-in window took too long to load. Try again."), 20_000);
+    const timer = setTimeout(() => fail("Plaid's script took more than 20 seconds to load."), 20_000);
     s.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
+    s.async = true;
     s.onload = () => {
       clearTimeout(timer);
-      if (window.Plaid) resolve();
-      else fail("Plaid's sign-in window couldn't start in this browser. Try again, or try another browser.");
+      if (window.Plaid) resolve(window.Plaid);
+      else fail("Plaid's script loaded but didn't start (a content blocker may be stopping it).");
     };
     s.onerror = () => {
       clearTimeout(timer);
-      fail("Couldn't load Plaid. Check your internet connection and try again.");
+      fail("Plaid's script couldn't be downloaded (no internet, or a content blocker is stopping cdn.plaid.com).");
     };
     document.head.appendChild(s);
   });
   return scriptPromise;
 }
 
-/** Where opening the bank's window is up to, for the button's label. */
-export type LinkStep = "token" | "script" | "window";
-
 /** Tells the server how far opening the bank's window got when it fails, so it shows in the site's logs (no account details). */
 function report(stage: string, code?: string) {
   void fetch("/api/plaid/report", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage, code }) }).catch(() => {});
 }
 
-/**
- * Opens Plaid Link and resolves with the public token, or null if you closed it.
- * Never hangs: if Plaid's window hasn't appeared after 25 seconds it is closed
- * and this fails with a message, so the button can offer to try again.
- */
-async function openLink(linkToken: string, onStep?: (s: LinkStep) => void) {
-  onStep?.("script");
-  try {
-    await loadPlaidScript();
-  } catch (e) {
-    report("script");
-    throw e;
-  }
-  onStep?.("window");
-  return new Promise<string | null>((resolve, reject) => {
-    let shown = false;
-    let done = false;
-    const finish = (fn: () => void) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      try {
-        handler.destroy();
-      } catch {}
-      fn();
-    };
-    const timer = setTimeout(() => {
-      if (shown) return;
-      report("window", "TIMEOUT");
-      finish(() => reject(new Error("Plaid's window didn't open. Try again; if it keeps happening, allow pop-ups and turn off content blockers for this site.")));
-    }, 25_000);
-    const handler = window.Plaid!.create({
-      token: linkToken,
-      onEvent: (name) => {
-        if (name === "OPEN" || name === "TRANSITION_VIEW" || name === "SELECT_INSTITUTION") shown = true;
-      },
-      onSuccess: (publicToken) => finish(() => resolve(publicToken)),
-      onExit: (err) => {
-        if (err) report("exit", err.error_code);
-        finish(() => (err ? reject(new Error(err.display_message || (err.error_message ? `Plaid stopped: ${err.error_message}. Try again.` : "The bank connection didn't finish. Try again."))) : resolve(null)));
-      },
-    });
-    handler.open();
-  });
+const tokenFor = (body: Record<string, unknown>) => () => api<{ linkToken: string }>("link-token", body, 20_000).then((r) => r.linkToken);
+
+/** Opens Plaid Link with a token already in hand; the public token, or null if you closed it. */
+async function openLink(linkToken: string) {
+  const r = await runLink({ getToken: async () => linkToken, loadScript: loadPlaidScript, report });
+  return r?.publicToken ?? null;
 }
 
-async function linkToken(body: Record<string, unknown>) {
-  try {
-    return (await api<{ linkToken: string }>("link-token", body, 20_000)).linkToken;
-  } catch (e) {
-    report("token", (e as Error & { code?: string }).code);
-    throw e;
-  }
+/** How a reconnect ended, in words for the panel. */
+export type ReconnectResult = { status: "connected" | "closed" | "not-shared"; message?: string };
+
+/** Last 4 digits of every account that already has a live bank feed. */
+function connectedMasks(d: MoneyData | null) {
+  const live = new Set((d?.bankLinks ?? []).filter((l) => !l.duplicateOf).map((l) => l.id));
+  return new Set((d?.accounts ?? []).filter((a) => a.plaid && live.has(a.plaid.linkId) && a.last4).map((a) => a.last4!));
 }
+const notShared = (target: string, masks: string[]) =>
+  `The bank finished, but the account ending ${target} wasn't shared${masks.length ? ` (you ticked ${masks.map((m) => `··${m}`).join(", ")})` : ""}. If ${target} isn't in that list, it's under a different online-banking login: use "It's under a different bank login" and sign in with that one.`;
 
 /**
  * Connects a bank straight from anywhere in Money (no trip to Accounts): opens
@@ -172,17 +128,29 @@ async function linkToken(body: Record<string, unknown>) {
  * accounts already here with the same last 4 digits are taken over, so their
  * history and company stay as they are.
  */
-export async function connectBank(scope: Scope, onStep?: (s: LinkStep) => void): Promise<string> {
-  onStep?.("token");
-  const publicToken = await openLink(await linkToken({}), onStep);
-  if (!publicToken) return "";
+export async function connectBank(scope: Scope, onStep?: (s: LinkStep) => void, target?: string): Promise<ReconnectResult> {
+  const r = await runLink({ getToken: tokenFor({}), loadScript: loadPlaidScript, onStep, report });
+  if (!r) return { status: "closed" };
+  // Reconnecting one account: if the login you signed in with only has accounts that are
+  // already connected, don't save it (that would be a second, duplicate connection).
+  if (target) {
+    const pick = checkPicked(r.meta, target, connectedMasks(getMoneyData()));
+    if (!pick.hasTarget && pick.onlyAlreadyConnected) return { status: "not-shared", message: notShared(target, pick.masks) };
+  }
   const id = newId();
-  const { itemId, link } = await api<{ itemId: string; link: string }>("exchange", { publicToken, id, scope });
+  const { itemId, link } = await api<{ itemId: string; link: string }>("exchange", { publicToken: r.publicToken, id, scope });
   const bank: BankLink = { id, itemId, institution: "", link, cursor: "", scope, connectedAt: new Date().toISOString() };
   setMoneyData((d) => ({ ...d, bankLinks: [...d.bankLinks, bank] }));
   setMode("real");
   await firstSync(bank, () => {});
-  return id;
+  return reconnected(target, r.meta);
+}
+
+/** Whether the account being reconnected now has a live feed (its existing record took it over). */
+function reconnected(target: string | undefined, meta: { accounts?: { mask?: string | null }[] }): ReconnectResult {
+  if (!target) return { status: "connected" };
+  if (connectedMasks(getMoneyData()).has(target)) return { status: "connected" };
+  return { status: "not-shared", message: notShared(target, (meta.accounts ?? []).map((a) => a.mask ?? "").filter(Boolean)) };
 }
 
 /**
@@ -191,11 +159,11 @@ export async function connectBank(scope: Scope, onStep?: (s: LinkStep) => void):
  * copied; the newly shared accounts then sync into the records already here
  * (matched by last 4 digits), keeping their company and history.
  */
-export async function addAccountsToBank(link: BankLink, onStep?: (s: LinkStep) => void): Promise<boolean> {
-  onStep?.("token");
-  if (!(await openLink(await linkToken({ link: link.link, addAccounts: true }), onStep))) return false;
+export async function addAccountsToBank(link: BankLink, onStep?: (s: LinkStep) => void, target?: string): Promise<ReconnectResult> {
+  const r = await runLink({ getToken: tokenFor({ link: link.link, addAccounts: true }), loadScript: loadPlaidScript, onStep, report });
+  if (!r) return { status: "closed" };
   await syncLink({ ...link, error: undefined });
-  return true;
+  return reconnected(target, r.meta);
 }
 
 /* ---------------- Syncing ---------------- */

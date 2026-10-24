@@ -247,6 +247,7 @@ function EntityPanel({
   const [step, setStep] = useState<LinkStep | null>(null);
   const connecting = step !== null;
   const [connectError, setConnectError] = useState("");
+  const [connectNote, setConnectNote] = useState("");
   // Bank history, but no live connection feeding any of this company's accounts.
   const all = [...b.accounts, ...b.cards];
   const missing = all.filter((a) => a.state === "lost" || a.state === "unlinked");
@@ -259,6 +260,7 @@ function EntityPanel({
   async function reconnect(otherLogin = false) {
     if (connecting) return;
     setConnectError("");
+    setConnectNote("");
     setStep("token");
     try {
       // First choice: tick the account in the bank connection you already have (no new connection, no copies).
@@ -266,8 +268,9 @@ function EntityPanel({
       // bank's account is matched to this record by its last 4 digits, so its history and company stay.
       const d = getMoneyData();
       const live = d?.bankLinks.find((l) => !l.duplicateOf && !l.errorCode);
-      if (live && !otherLogin) await addAccountsToBank(live, setStep);
-      else await connectBank(b.entity, setStep);
+      const target = missing.length === 1 ? missing[0].last4 : undefined;
+      const r = live && !otherLogin ? await addAccountsToBank(live, setStep, target) : await connectBank(b.entity, setStep, target);
+      if (r.status === "not-shared") setConnectNote(r.message ?? "");
     } catch (e) {
       setConnectError((e as Error).message || "Something went wrong opening your bank. Try again.");
     } finally {
@@ -292,7 +295,7 @@ function EntityPanel({
         {needsConnection && (
           <div className="mt-2 flex flex-col gap-1" data-testid={`reconnect-${b.entity}`}>
             <button className="self-start rounded-full bg-brand px-4 py-1.5 text-sm font-medium text-on-brand disabled:opacity-60" onClick={() => void reconnect()} disabled={connecting}>
-              {step === "token" ? "Getting a secure link…" : step === "script" ? "Loading Plaid…" : step === "window" ? "Opening your bank's window…" : connectError ? "Try again" : `Add ${missing.length === 1 && missing[0].last4 ? `··${missing[0].last4}` : "account"} from your bank`}
+              {step === "token" ? "Getting a secure link…" : step === "script" ? "Loading Plaid…" : step === "starting" ? "Starting Plaid…" : step === "open" ? "Finish in the Plaid window" : step === "finishing" ? "Bringing the account in…" : connectError ? "Try again" : `Add ${missing.length === 1 && missing[0].last4 ? `··${missing[0].last4}` : "account"} from your bank`}
             </button>
             <p className="text-xs text-zinc-500">
               Tick {missing.length === 1 && missing[0].last4 ? `the account ending ${missing[0].last4}` : "it"} when the bank lists your accounts. Not listed?{" "}
@@ -300,6 +303,11 @@ function EntityPanel({
                 It&apos;s under a different bank login
               </button>
             </p>
+            {connectNote && (
+              <p className="text-sm text-amber-700 dark:text-amber-400" role="status" data-testid={`reconnect-note-${b.entity}`}>
+                {connectNote}
+              </p>
+            )}
             {connectError && (
               <p className="text-sm text-rose-600 dark:text-rose-400" role="alert" data-testid={`reconnect-error-${b.entity}`}>
                 {connectError}
