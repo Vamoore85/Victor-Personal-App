@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 import { dbConfigured, getFile, putFile, readDoc, writeDoc } from "@/lib/db";
 import { extract, mergeFound, RULES, type EmailItem, type EmailStatus, type RawMessage } from "@/features/gmail/parse";
 import type { Scope } from "@/features/money/types";
+import { claimScan, collectScanBatch, scanKey, scanRange, type ScanCursor } from "@/features/gmail/scan-history";
 
 /*
  * Read-only Gmail link that finds bills and receipts.
@@ -20,8 +21,8 @@ import type { Scope } from "@/features/money/types";
 export type GoogleKeys = { clientId: string; secret: string };
 type Tokens = { access: string; accessExpires: number; refresh: string; scope: string };
 type Connection = { sealed: string; email: string; connectedAt: string };
-export type ScanInfo = { from: string; to: string; at: string; looked: number; kept: number; added: number; duplicates: number; capped: boolean; rechecked?: number; movedOut?: number };
-export type EmailDoc = { items: EmailItem[]; lastScan: ScanInfo | null };
+export type ScanInfo = { from: string; to: string; at: string; looked: number; kept: number; added: number; duplicates: number; capped: boolean; rechecked?: number; movedOut?: number; totalLooked?: number; totalKept?: number; failed?: number };
+export type EmailDoc = { items: EmailItem[]; lastScan: ScanInfo | null; scans?: Record<string, ScanCursor> };
 
 const KEYS_DOC = "gmail-keys";
 const CONNECTION_DOC = "gmail-connection";
@@ -35,7 +36,6 @@ export const SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 
 export const MAX_DAYS = 180;
 export const MAX_MESSAGES = 400; // emails read per scan; the next scan carries on with the rest
-const MAX_LISTED = 3000; // ids are cheap to list, so emails already saved don't use up a scan
 const MAX_RECHECK = 150;
 
 export class GmailError extends Error {
@@ -156,6 +156,8 @@ async function api<T>(tokens: Tokens, path: string): Promise<T> {
   const res = await fetch(`${API}${path}`, { headers: { Accept: "application/json", Authorization: `Bearer ${tokens.access}` }, cache: "no-store" });
   if (res.status === 401) throw new GmailError("Google signed this site out of Gmail. Press Connect Gmail again.", 401);
   if (res.status === 403) throw new GmailError("Google refused the request. Check that the Gmail API is turned on for your Google Cloud project.", 403);
+  if (res.status === 404) throw new GmailError("That email is no longer available in Gmail.", 404);
+  if (res.status === 400) throw new GmailError("Gmail could not continue this scan. Press Restart period to begin this period again.", 400);
   if (!res.ok) throw new GmailError(`Gmail returned an error (${res.status}).`, 502);
   return (await res.json()) as T;
 }
@@ -202,7 +204,7 @@ export const connectedEmail = async () => (await readConnection().catch(() => nu
 export async function readItems(): Promise<EmailDoc> {
   if (!dbConfigured()) return { items: [], lastScan: null };
   const d = (await readDoc(ITEMS_DOC))?.data as Partial<EmailDoc> | null;
-  return { items: Array.isArray(d?.items) ? d.items : [], lastScan: d?.lastScan ?? null };
+  return { items: Array.isArray(d?.items) ? d.items : [], lastScan: d?.lastScan ?? null, scans: d?.scans ?? {} };
 }
 
 export async function status() {
@@ -246,65 +248,79 @@ async function inBatches<T, R>(list: T[], size: number, fn: (x: T) => Promise<R>
 }
 
 /** Searches the last `days` days (ending `today`) for bills and receipts and saves what it finds for review. */
-export async function scan(days: number, today: string) {
+export async function scan(days: number, today: string, options: { year?: number; restart?: boolean } = {}) {
   needDb();
   const keys = await getKeys();
   if (!keys) throw new GmailError("Add the Google keys first.");
-  const span = Math.min(MAX_DAYS, Math.max(1, Math.round(days)));
-  const from = addDays(today, -(span - 1));
+  let range: { from: string; to: string };
+  try { range = scanRange(days, today, options.year); } catch (e) { throw new GmailError((e as Error).message); }
+  const { from, to } = range;
+  const key = scanKey(from, to);
   const tokens = await freshTokens(keys);
-  const saved = await readItems();
-  const known = new Set(saved.items.map((i) => i.id));
-  const ids: string[] = [];
-  let page: string | undefined;
-  do {
-    const q = new URLSearchParams({ q: searchQuery(from, today), maxResults: "500", ...(page ? { pageToken: page } : {}) });
-    const res = await api<{ messages?: { id: string }[]; nextPageToken?: string }>(tokens, `/messages?${q}`);
-    ids.push(...(res.messages ?? []).map((m) => m.id));
-    page = res.nextPageToken;
-  } while (page && ids.length < MAX_LISTED);
-  const fresh = ids.filter((id) => !known.has(id));
-
-  // Emails found under older rules are read again: still-unreviewed ones the
-  // rules now say aren't bills move to "Not bills", and every one gets the
-  // link to its exact message.
-  const stale = saved.items.filter((i) => (i.rules ?? 0) < RULES).slice(0, MAX_RECHECK);
-  const look = fresh.slice(0, MAX_MESSAGES - stale.length);
-  const capped = Boolean(page) || fresh.length > look.length;
-
-  const foundAt = new Date().toISOString();
-  const read = (id: string) =>
-    api<RawMessage>(tokens, `/messages/${encodeURIComponent(id)}?format=full&fields=id,internalDate,payload`)
-      .then((m) => ({ ok: true as const, item: extract(m, foundAt) }))
-      .catch((e) => {
-        if (e instanceof GmailError && e.status === 401) throw e;
-        return { ok: false as const, item: null }; // one unreadable message doesn't stop the scan
-      });
-  const found = (await inBatches(look, 8, read)).map((r) => r.item).filter((x): x is EmailItem => x !== null);
-  const again = new Map((await inBatches(stale, 8, (i) => read(i.id))).flatMap((r, n) => (r.ok ? [[stale[n].id, r.item] as const] : [])));
-
-  let info: ScanInfo | null = null;
-  await put(ITEMS_DOC, (current) => {
-    const d = (current ?? {}) as Partial<EmailDoc>;
-    let movedOut = 0;
-    const kept = (Array.isArray(d.items) ? d.items : []).map((i) => {
-      if (!again.has(i.id)) return i;
-      const now = again.get(i.id) ?? null;
-      const next: EmailItem = { ...i, rules: RULES, ...(now?.messageId ? { messageId: now.messageId } : {}) };
-      // Only items you haven't touched move; anything you reviewed stays as you left it.
-      if (!now && i.status === "review" && !i.scope && !i.billId) {
-        movedOut++;
-        next.status = "ignored";
-        next.flags = [...i.flags, `Maverick's updated rules say this isn't a bill or receipt. Press "It is a bill" if it is one.`];
-      }
-      return next;
-    });
-    const merged = mergeFound(kept, found);
-    info = { from, to: today, at: foundAt, looked: look.length, kept: found.length, added: merged.added, duplicates: merged.duplicates, capped, rechecked: again.size, movedOut };
-    return { items: merged.items, lastScan: info } satisfies EmailDoc;
+  const lease = randomBytes(16).toString("hex");
+  let cursor!: ScanCursor;
+  await put(ITEMS_DOC, current => {
+    const d = (current ?? { items: [], lastScan: null }) as EmailDoc;
+    try { cursor = claimScan(d.scans?.[key], lease, Date.now(), options.restart); } catch (e) { throw new GmailError((e as Error).message, 409); }
+    return { ...d, scans: { ...d.scans, [key]: cursor } };
   });
-  console.log(`gmail scan: days=${span} listed=${ids.length} looked=${look.length} kept=${found.length} rechecked=${again.size} capped=${capped}`); // counts only
-  return info!;
+  try {
+    const batch = await collectScanBatch(cursor, async (page, limit) => {
+      const q = new URLSearchParams({ q: searchQuery(from, to), maxResults: String(limit), ...(page ? { pageToken: page } : {}) });
+      const res = await api<{ messages?: { id: string }[]; nextPageToken?: string }>(tokens, `/messages?${q}`);
+      return { ids: (res.messages ?? []).map(m => m.id), page: res.nextPageToken };
+    }, MAX_MESSAGES);
+    const saved = await readItems();
+    const known = new Set(saved.items.map(i => i.id));
+    const stale = saved.items.filter(i => (i.rules ?? 0) < RULES).slice(0, MAX_RECHECK);
+    const foundAt = new Date().toISOString();
+    const retryIds: string[] = [];
+    const found = (await inBatches(batch.ids.filter(id => !known.has(id)), 8, async id => {
+      try { return extract(await api<RawMessage>(tokens, `/messages/${encodeURIComponent(id)}?format=full&fields=id,internalDate,payload`), foundAt); }
+      catch (e) {
+        if (e instanceof GmailError && [401, 403].includes(e.status)) throw e;
+        if (!(e instanceof GmailError && e.status === 404)) retryIds.push(id);
+        return null;
+      }
+    })).filter((x): x is EmailItem => x !== null);
+    // Preserve the newer parser's migration: repair source links and move untouched false finds out.
+    const again = new Map<string, EmailItem | null>();
+    await inBatches(stale, 8, async item => {
+      try { again.set(item.id, extract(await api<RawMessage>(tokens, `/messages/${encodeURIComponent(item.id)}?format=full&fields=id,internalDate,payload`), foundAt)); }
+      catch (e) { if (e instanceof GmailError && [401, 403].includes(e.status)) throw e; }
+    });
+    const next: ScanCursor = { page: batch.page, retryIds, looked: cursor.looked + batch.listed, kept: cursor.kept + found.length, complete: !batch.page && !retryIds.length };
+    let info!: ScanInfo;
+    await put(ITEMS_DOC, current => {
+      const d = current as EmailDoc;
+      if (d.scans?.[key]?.lease?.id !== lease) throw new GmailError("Another scan took over. Refresh before continuing.", 409);
+      let movedOut = 0;
+      const kept = d.items.map(item => {
+        if (!again.has(item.id)) return item;
+        const checked = again.get(item.id);
+        const updated: EmailItem = { ...item, rules: RULES, ...(checked?.messageId ? { messageId: checked.messageId } : {}) };
+        if (!checked && item.status === "review" && !item.scope && !item.billId) {
+          movedOut++;
+          updated.status = "ignored";
+          updated.flags = [...item.flags, `Maverick's updated rules say this isn't a bill or receipt. Press "It is a bill" if it is one.`];
+        }
+        return updated;
+      });
+      const merged = mergeFound(kept, found);
+      info = { from, to, at: foundAt, looked: batch.ids.length, kept: found.length, added: merged.added, duplicates: merged.duplicates, capped: !next.complete, totalLooked: next.looked, totalKept: next.kept, failed: retryIds.length, rechecked: again.size, movedOut };
+      return { ...d, items: merged.items, lastScan: info, scans: { ...d.scans, [key]: next } };
+    });
+    return info;
+  } finally {
+    await put(ITEMS_DOC, current => {
+      const d = current as EmailDoc;
+      const active = d.scans?.[key];
+      if (active?.lease?.id !== lease) return d;
+      const released = { ...active };
+      delete released.lease;
+      return { ...d, scans: { ...d.scans, [key]: released } };
+    });
+  }
 }
 
 /* ---- Your review ---- */
@@ -365,7 +381,7 @@ export async function review(c: ReviewChange) {
     const d = (current ?? {}) as Partial<EmailDoc>;
     const items = applyReview(Array.isArray(d.items) ? d.items : [], c);
     item = items.find((i) => i.id === c.id);
-    return { items, lastScan: d.lastScan ?? null } satisfies EmailDoc;
+    return { ...d, items, lastScan: d.lastScan ?? null } satisfies EmailDoc;
   });
   return item!;
 }

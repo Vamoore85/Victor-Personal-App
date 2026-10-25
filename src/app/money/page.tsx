@@ -10,7 +10,7 @@ export default function MoneyPage() {
     <div>
       <PageHeader
         title="Money"
-        subtitle="Your balances, upcoming bills, and recent activity."
+        subtitle="Bills, spending, bank accounts, and receipts."
       />
       <Suspense fallback={<p>Loading your money…</p>}><FinancialCenter /></Suspense>
     </div>

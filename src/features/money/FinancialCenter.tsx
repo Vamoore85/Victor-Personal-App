@@ -30,22 +30,22 @@ import { Taxes } from "./taxes";
 import { clearQuickBooksNotice, quickBooksNotice as readQuickBooksNotice } from "./quickbooks";
 import { COMPANIES, isCompany, type Company } from "./types";
 
-// Four views on top, all three entities together. Everything else is under Details.
+// One place for each job. Bills is the default; the optional summary lives under Tools.
 const MAIN = [
-  { id: "overview", label: "Overview" },
   { id: "bills", label: "Bills" },
   { id: "spending", label: "Spending" },
-  { id: "accounts", label: "Accounts" },
+  { id: "accounts", label: "Bank accounts" },
 ];
 
 const DETAILS: { id: string; label: string; scoped?: boolean }[] = [
+  { id: "overview", label: "Money summary" },
   { id: "transactions", label: "Edit transactions", scoped: true },
   { id: "calendar", label: "Bill calendar" },
   { id: "briefing", label: "Briefing" },
   { id: "command", label: "Command center" },
   { id: "books", label: "Company books" },
   { id: "budgets", label: "Budgets", scoped: true },
-  { id: "receipts", label: "Receipts", scoped: true },
+  { id: "receipts", label: "Receipt photos", scoped: true },
   { id: "documents", label: "Documents" },
   { id: "taxes", label: "Taxes", scoped: true },
   { id: "institutions", label: "Maverick Vault", scoped: true },
@@ -80,7 +80,7 @@ export function FinancialCenter() {
     return <p className="text-sm text-zinc-500">Loading…</p>;
   }
   const requested = searchParams.get("tab");
-  const tab = chosenTab ?? (requested && [...MAIN, ...DETAILS].some((t) => t.id === requested) ? requested : "overview");
+  const tab = chosenTab ?? (requested && [...MAIN, ...DETAILS].some((t) => t.id === requested) ? requested : "bills");
 
   const personalCategories = categoriesInUse(filterByScope(data, "personal"), DEFAULT_CATEGORIES);
   const categories =
@@ -150,6 +150,7 @@ export function FinancialCenter() {
             </button>
           ))}
         </div>
+        <Link href="/email-bills" className={`${ghostButtonClass} whitespace-nowrap`}>Receipts</Link>
         <details className="relative shrink-0" data-testid="details-menu">
           <summary aria-label="More tools" className={`${ghostButtonClass} list-none whitespace-nowrap ${detailTab ? "text-brand" : ""}`}>
             <span className="hidden sm:inline">{detailTab ? detailTab.label : "Tools"} ▾</span>
@@ -189,6 +190,9 @@ export function FinancialCenter() {
         />
       </nav>
       <CloudBadge state={cloud} />
+      {tab === "bills" && <p className="text-sm text-zinc-500">What is coming due, how much, and when.</p>}
+      {tab === "spending" && <p className="text-sm text-zinc-500">Past purchases and where your money went.</p>}
+      {tab === "accounts" && <p className="text-sm text-zinc-500">Bank balances, account names, and connections.</p>}
 
       {detailTab?.scoped && (
         <div role="radiogroup" aria-label="Show" className="inline-flex max-w-full self-start overflow-x-auto rounded-full border border-zinc-300 bg-surface p-0.5 [scrollbar-width:none] dark:border-zinc-700">
@@ -225,7 +229,7 @@ export function FinancialCenter() {
             data={data}
             onBriefing={() => {
               setMode("real");
-              setTab("overview");
+              setTab("bills");
             }}
           />
           <Accounts data={data} />
