@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 import { dbConfigured, getFile, putFile, readDoc, writeDoc } from "@/lib/db";
 import { extract, mergeFound, RULES, type EmailItem, type EmailStatus, type RawMessage } from "@/features/gmail/parse";
 import type { Scope } from "@/features/money/types";
-import { SCAN_BATCH_SIZE, claimScan, collectScanBatch, scanKey, scanRange, type ScanCursor } from "@/features/gmail/scan-history";
+import { SCAN_BATCH_SIZE, claimMailScan, collectScanBatch, scanKey, scanRange, type ScanCursor } from "@/features/gmail/scan-history";
 import { gmailFailure } from "@/features/gmail/api-errors";
 import { applyRecurringEmails, recurringEmailBills } from "@/features/gmail/recurring";
 import { asMoney, MONEY_DOC } from "@/lib/money-doc";
@@ -256,7 +256,7 @@ async function inBatches<T, R>(list: T[], size: number, fn: (x: T) => Promise<R>
 }
 
 /** Searches the last `days` days (ending `today`) for bills and receipts and saves what it finds for review. */
-export async function scan(days: number, today: string, options: { year?: number; restart?: boolean } = {}) {
+export async function scan(days: number, today: string, options: { year?: number; restart?: boolean; automatic?: boolean } = {}) {
   needDb();
   const keys = await getKeys();
   if (!keys) throw new GmailError("Add the Google keys first.");
@@ -269,7 +269,7 @@ export async function scan(days: number, today: string, options: { year?: number
   let cursor!: ScanCursor;
   await put(ITEMS_DOC, current => {
     const d = (current ?? { items: [], lastScan: null }) as EmailDoc;
-    try { cursor = claimScan(d.scans?.[key], lease, Date.now(), options.restart); } catch (e) { throw new GmailError((e as Error).message, 409); }
+    try { cursor = claimMailScan(d.scans ?? {}, key, lease, Date.now(), options.restart); } catch (e) { throw new GmailError((e as Error).message, 409); }
     return { ...d, scans: { ...d.scans, [key]: cursor } };
   });
   try {
@@ -316,7 +316,7 @@ export async function scan(days: number, today: string, options: { year?: number
       });
       const merged = mergeFound(kept, found);
       info = { from, to, at: foundAt, looked: batch.ids.length, kept: found.length, added: merged.added, duplicates: merged.duplicates, capped: !next.complete, totalLooked: next.looked, totalKept: next.kept, failed: retryIds.length, rechecked: again.size, movedOut };
-      return { ...d, items: merged.items, lastScan: info, scans: { ...d.scans, [key]: next } };
+      return { ...d, items: merged.items, lastScan: options.automatic ? d.lastScan : info, scans: { ...d.scans, [key]: next } };
     });
     return info;
   } finally {

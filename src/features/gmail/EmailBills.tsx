@@ -11,6 +11,7 @@ import { gmailLink, suggestBill, suggestScope } from "./match";
 import type { EmailItem } from "./parse";
 import { SCAN_BATCH_SIZE, scanRange } from "./scan-history";
 import { ReceiptFolders } from "@/features/receipts/ReceiptFolders";
+import type { AutomaticMailState } from "./automatic";
 
 /*
  * Email bills: a read-only Gmail link that finds bills and receipts in a date
@@ -108,6 +109,7 @@ export function EmailBillsScreen() {
       ) : (
         <>
           <Connection status={status} reload={load} />
+          {status.connected && <AutomaticMail reload={load} />}
           {status.connected && <Scan status={status} reload={load} onYearChange={setYearFilter} />}
           <ReceiptFolders selectedYear={yearFilter} onYearChange={setYearFilter} refreshKey={status.lastScan?.at} />
           {status.items.length > 0 && <Review status={status} reload={load} onItem={onItem} year={yearFilter} />}
@@ -122,7 +124,7 @@ function ScopeNote() {
     <section className="rounded-xl border border-zinc-200 bg-surface p-4 text-sm dark:border-zinc-800" data-testid="gmail-scope">
       <h2 className="font-medium">What Maverick reads in your Gmail</h2>
       <ul className="mt-2 list-disc space-y-1 pl-5 text-zinc-600 dark:text-zinc-400">
-        <li>Only when you press Scan, and only the period you pick. A scan continues in batches while this page stays open; Pause stops after the current batch.</li>
+        <li>Automatic checks read recent financial emails in the background when enabled below. Manual scans read the period you pick and continue while this page stays open; Pause stops after the current batch.</li>
         <li>Only emails that look like bills or receipts. Chats, promotions, social and forum mail are skipped, and an email that isn&apos;t a bill or receipt is dropped without saving anything from it.</li>
         <li>A scan saves the sender, subject, amount, dates and source reference. Download ZIP on Receipt folders reads the original emails, attachments included, and keeps a private encrypted copy of the ones you&apos;ve filed under a company.</li>
         <li>Read-only. It can&apos;t send, delete, move or mark email, and it never asks for your Google password: Google&apos;s own screen does the sign-in.</li>
@@ -130,6 +132,36 @@ function ScopeNote() {
       </ul>
     </section>
   );
+}
+
+type AutoState = AutomaticMailState & {configured:boolean;schedule:string};
+
+function AutomaticMail({reload}: {reload:()=>Promise<void>}) {
+  const [state,setState] = useState<AutoState | null>(null);
+  const [busy,setBusy] = useState(false);
+  const [error,setError] = useState("");
+  useEffect(()=> { call<{automatic:AutoState}>("automatic").then(r=>setState(r.automatic)).catch(e=>setError(e.message)); },[]);
+  async function act(body: Record<string,unknown>) {
+    setBusy(true); setError("");
+    try {
+      const result = await call<{automatic:AutoState}>("automatic",body);
+      setState(result.automatic);
+      await reload();
+    } catch(e) {setError((e as Error).message);} finally {setBusy(false);}
+  }
+  return <section className="rounded-xl border border-zinc-200 bg-surface p-4 dark:border-zinc-800" data-testid="automatic-mail">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="font-medium">Automatic email checks · {state?.enabled ? "On" : "Off"}</p>
+      <div className="flex gap-2">
+        <button className={ghostButtonClass} disabled={busy || !state?.configured} onClick={()=>void act({enabled:!state?.enabled})}>{state?.enabled ? "Pause automatic checks" : "Turn on automatic checks"}</button>
+        {state?.enabled && <button className={ghostButtonClass} disabled={busy} onClick={()=>void act({checkNow:true})}>{busy ? "Checking…" : "Check now"}</button>}
+      </div>
+    </div>
+    <p className="mt-2 text-sm text-zinc-500">{state?.schedule ?? "Scheduled checks"} · Recent bills and receipts · Runs with this page closed</p>
+    {state?.lastCheck && <p className="mt-1 text-sm">Last check: {new Date(state.lastCheck).toLocaleString()}{state.looked !== undefined ? ` · ${state.looked} emails examined` : ""}</p>}
+    {state?.lastNote && <p className="mt-1 text-sm text-zinc-500">{state.lastNote}</p>}
+    {(error || state?.lastError) && <p role="status" className="mt-2 text-sm text-amber-700">{error || state?.lastError}</p>}
+  </section>;
 }
 
 function Connection({ status, reload }: { status: Status; reload: () => Promise<void> }) {

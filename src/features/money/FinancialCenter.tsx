@@ -13,6 +13,7 @@ import { Overview } from "./outlook-ui";
 import { AssignAccounts } from "./assign-ui";
 import { assignedOnly } from "./accounts-fix";
 import { RecurringBills } from "./recurring-ui";
+import { RecurringEmailBills } from "@/features/gmail/RecurringEmailBills";
 import { Bills } from "./bill-intel-ui";
 import { Spending } from "./spending-ui";
 import { Documents } from "./documents-ui";
@@ -218,7 +219,7 @@ export function FinancialCenter() {
 
       {tab === "overview" && <Overview data={data} onSettings={() => setTab("accounts")} />}
       {tab === "spending" && <Spending data={assignedOnly(data)} goTo={setTab} initialEntity="all" />}
-      {tab === "bills" && <RecurringBills data={data} categories={categories} />}
+      {tab === "bills" && <><RecurringEmailBills /><RecurringBills data={data} categories={categories} /></>}
       {tab === "accounts" && (
         <>
           <AssignAccounts data={data} />

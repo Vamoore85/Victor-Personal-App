@@ -5,6 +5,9 @@ import { SESSION_COOKIE, setupSession, validSession } from "@/lib/auth";
 // files needs the owner's password and authenticator code. A device signed in
 // with the password alone (from before 2-step sign-in) is sent to finish setup.
 export function proxy(request: NextRequest) {
+  // This exact endpoint authenticates Vercel's scheduler with CRON_SECRET in its handler.
+  // It returns counts only and never accepts an owner-session bypass for any other route.
+  if (request.nextUrl.pathname === "/api/gmail/auto-scan") return NextResponse.next();
   const cookie = request.cookies.get(SESSION_COOKIE)?.value;
   if (validSession(cookie)) return NextResponse.next();
   const { pathname, search } = request.nextUrl;
