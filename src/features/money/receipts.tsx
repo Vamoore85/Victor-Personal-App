@@ -8,6 +8,7 @@ import { ScopeBadge, useDefaultScope } from "./scope";
 import { COMPANIES, companyLabel, isCompany, type MoneyData, type Receipt, type Scope, type Transaction } from "./types";
 import { businessCategory } from "./books";
 import { Card, Empty, Field, Stat, buttonClass, ghostButtonClass, inputClass } from "./ui";
+import { ReceiptFolders } from "@/features/receipts/ReceiptFolders";
 
 /*
  * Receipts: photos or PDFs saved to the online database and tied to the
@@ -179,6 +180,8 @@ export function Receipts({ data }: { data: MoneyData }) {
         <Stat label="Not matched yet" value={String(unmatched)} tone={unmatched > 0 ? "bad" : undefined} />
         <Stat label={`Business costs missing a receipt (${year})`} value={String(missing.length)} tone={missing.length > 0 ? "bad" : "good"} />
       </div>
+
+      <ReceiptFolders />
 
       <Card title="Add receipts">
         <p className="mb-4 text-sm text-zinc-500">

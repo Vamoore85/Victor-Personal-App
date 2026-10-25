@@ -196,6 +196,9 @@ export async function disconnect() {
   if (dbConfigured()) await put(CONNECTION_DOC, () => ({}));
 }
 
+/** The Gmail address that's connected, or null. */
+export const connectedEmail = async () => (await readConnection().catch(() => null))?.conn.email || null;
+
 export async function readItems(): Promise<EmailDoc> {
   if (!dbConfigured()) return { items: [], lastScan: null };
   const d = (await readDoc(ITEMS_DOC))?.data as Partial<EmailDoc> | null;
@@ -365,4 +368,27 @@ export async function review(c: ReviewChange) {
     return { items, lastScan: d.lastScan ?? null } satisfies EmailDoc;
   });
   return item!;
+}
+
+/* ---- Originals for downloads ---- */
+
+/**
+ * A reader for the original emails (as .eml, exactly as Gmail has them), or
+ * the reason they can't be read. Only reads; nothing in the mailbox changes.
+ */
+export async function originalsReader(): Promise<{ read: (id: string) => Promise<Buffer | null> } | { why: string }> {
+  const keys = await getKeys().catch(() => null);
+  if (!keys) return { why: "Gmail isn't set up, so the original emails aren't included." };
+  let tokens: Tokens;
+  try {
+    tokens = await freshTokens(keys);
+  } catch (e) {
+    return { why: e instanceof GmailError ? `${e.message} The original emails aren't included.` : "Couldn't reach Gmail, so the original emails aren't included." };
+  }
+  return {
+    read: (id) =>
+      api<{ raw?: string }>(tokens, `/messages/${encodeURIComponent(id)}?format=raw&fields=raw`)
+        .then((m) => (m.raw ? Buffer.from(m.raw, "base64url") : null))
+        .catch(() => null),
+  };
 }
