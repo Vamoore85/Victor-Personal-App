@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
+import { RecurringEmailBills } from "@/features/gmail/RecurringEmailBills";
 import { confirmFinding, setFindingStatus } from "./bill-intel";
 import { BillDetail } from "./bill-intel-ui";
 import { addDays, money, today } from "./calc";
@@ -51,15 +52,30 @@ export function RecurringBills({ data, categories }: { data: MoneyData; categori
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-xl font-semibold tracking-tight">Recurring bills</h2>
-          <p className="text-sm text-zinc-500" data-testid="scan-line">
+          <details className="mt-1 text-sm text-zinc-500">
+          <summary className="cursor-pointer">Bill sources</summary>
+          <p className="mt-1" data-testid="scan-line">
             {scan
               ? `Found in ${scan.scanned.toLocaleString()} transactions (${scan.bankFeed.toLocaleString()} from your banks), ${longDate(scan.windowStart)} to ${longDate(scan.windowEnd)}`
               : bankTxns
                 ? "Looking through your transactions…"
                 : "No bank transactions yet, so no bills have been found."}
           </p>
+          </details>
         </div>
-        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+      </header>
+
+      <BillCalendar data={data} onOpen={setOpenId} />
+
+      <UpcomingColumns lines={lines} onOpen={setOpenId} />
+
+      <RecurringEmailBills />
+
+      <details className="group" data-testid="review-bills">
+        <summary className="cursor-pointer list-none text-lg font-semibold tracking-tight">
+          <span className="mr-1 inline-block transition group-open:rotate-90">›</span> Review and confirm bills
+        </summary>
+        <div className="mt-3 flex w-full flex-wrap gap-2">
           <input
             type="search"
             value={query}
@@ -75,16 +91,6 @@ export function RecurringBills({ data, categories }: { data: MoneyData; categori
             ))}
           </select>
         </div>
-      </header>
-
-      <BillCalendar data={data} onOpen={setOpenId} />
-
-      <UpcomingColumns lines={lines} onOpen={setOpenId} />
-
-      <details className="group" data-testid="review-bills">
-        <summary className="cursor-pointer list-none text-lg font-semibold tracking-tight">
-          <span className="mr-1 inline-block transition group-open:rotate-90">›</span> Review and confirm bills
-        </summary>
       <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-start">
         {COLUMNS.map((e) => (
           <BillColumn
@@ -283,7 +289,7 @@ function BillCalendar({ data, onOpen }: { data: MoneyData; onOpen: (id: string) 
   const t = today();
   const weekStart = addDays(t, -new Date(`${t}T12:00:00`).getDay() + offset * 7);
   const end = addDays(weekStart, WEEKS * 7 - 1);
-  const lines = useMemo(() => upcoming(data, Math.max(1, Math.round((Date.parse(`${end}T12:00:00`) - Date.parse(`${t}T12:00:00`)) / 864e5) + 1)), [data, end, t]);
+  const lines = upcoming(data, Math.max(1, Math.round((Date.parse(`${end}T12:00:00`) - Date.parse(`${t}T12:00:00`)) / 864e5) + 1));
   const byDay = new Map<string, UpcomingLine[]>();
   for (const l of lines) if (l.date >= weekStart && l.date <= end) byDay.set(l.date, [...(byDay.get(l.date) ?? []), l]);
   const days = Array.from({ length: WEEKS * 7 }, (_, i) => addDays(weekStart, i));

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { newId, setMoneyData } from "./store";
 import { ACCOUNT_TYPES, DEFAULT_CATEGORIES, type Account, type AccountType, type MoneyData, type Transaction } from "./types";
 import { BUSINESS_CATEGORY_NAMES, learnCategory } from "./books";
@@ -12,6 +12,7 @@ import type { Budget } from "./types";
 import { isCompany, type Scope } from "./types";
 import { Bar, Card, Empty, Field, Stat, buttonClass, ghostButtonClass, inputClass } from "./ui";
 import { AttachReceipt, receiptFor } from "./receipts";
+import { accountLabel } from "./accounts-fix";
 
 /** Spending against a budget counts only transactions in the budget's own book. */
 function budgetSpent(data: MoneyData, b: Budget, month: string) {
@@ -197,6 +198,11 @@ export function Accounts({ data }: { data: MoneyData }) {
   const defaultScope = useDefaultScope();
   const [draft, setDraft] = useState<AccountDraft>(() => blankAccount(defaultScope));
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const formRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (formOpen) formRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [formOpen, editingId]);
   const set = <K extends keyof AccountDraft>(k: K, v: AccountDraft[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const isCard = draft.type === "credit";
 
@@ -225,6 +231,7 @@ export function Accounts({ data }: { data: MoneyData }) {
     }));
     setDraft(blankAccount(defaultScope));
     setEditingId(null);
+    setFormOpen(false);
   }
 
   function edit(a: Account) {
@@ -242,7 +249,7 @@ export function Accounts({ data }: { data: MoneyData }) {
       dueDay: str(a.dueDay),
       minPayment: str(a.minPayment),
     });
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setFormOpen(true);
   }
 
   function remove() {
@@ -256,6 +263,7 @@ export function Accounts({ data }: { data: MoneyData }) {
     }));
     setDraft(blankAccount(defaultScope));
     setEditingId(null);
+    setFormOpen(false);
   }
 
   const owed = ACCOUNT_TYPES.find((t) => t.value === draft.type)?.liability;
@@ -276,18 +284,25 @@ export function Accounts({ data }: { data: MoneyData }) {
     const owedNow = Math.max(0, -b);
     const used = a.creditLimit ? (owedNow / a.creditLimit) * 100 : null;
     const due = a.dueDay ? nextDueFromDay(a.dueDay) : null;
+    const link = a.plaid ? data.bankLinks.find(l => l.id === a.plaid?.linkId) : undefined;
+    // Available credit is not a card balance. Use current debt or the recorded ledger.
+    const bankAmount = a.bankBalance ? (debt ? a.bankBalance.current : a.bankBalance.available ?? a.bankBalance.current) : null;
+    const balance = bankAmount !== null
+      ? debt && bankAmount >= 0 ? `${money(bankAmount)} owed` : money(bankAmount)
+      : debt && b <= 0 ? `${money(owedNow)} owed` : money(b);
     return (
-      <li key={a.id} className="flex flex-col gap-2 py-3">
-        <div className="flex items-center justify-between gap-3">
+      <li key={a.id} className="flex min-w-0 flex-col gap-2 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="font-medium">
-              {a.name}
+            <p className="break-words font-medium">
+              {accountLabel(a)}
               {a.last4 && <span className="ml-1 text-sm font-normal text-zinc-500">•••• {a.last4}</span>}
               <ScopeBadge item={a} />
+              {a.needsEntity && <span className="ml-2 text-sm text-amber-700 dark:text-amber-300">Needs assignment</span>}
             </p>
             <p className="text-xs text-zinc-500">
               {accountTypeLabel(a)}
-              {a.institutionId && institutionNames.get(a.institutionId) && ` · ${institutionNames.get(a.institutionId)}`}
+              {link ? ` · ${link.institution || "Bank connected"}${link.error ? " · connection needs attention" : ""}` : a.institutionId && institutionNames.get(a.institutionId) ? ` · ${institutionNames.get(a.institutionId)}` : " · manual account"}
               {a.apr !== undefined && ` · ${a.apr}% APR`}
               {due && (
                 <>
@@ -300,17 +315,24 @@ export function Accounts({ data }: { data: MoneyData }) {
               {a.minPayment !== undefined && ` · min ${money(a.minPayment)}`}
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-3">
-            <span className={`tabular-nums ${b < 0 ? "text-rose-600 dark:text-rose-400" : ""}`}>
-              {debt && b <= 0 ? `${money(owedNow)} owed` : money(b)}
-            </span>
-            <button className="text-xs text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100" onClick={() => edit(a)}>
+          <div className="ml-auto flex shrink-0 items-center gap-3">
+            <div className="text-right">
+              <p className="font-semibold tabular-nums">
+                {balance}
+              </p>
+              <p className="text-xs text-zinc-500">
+                {bankAmount !== null && a.bankBalance
+                  ? `${!debt && a.bankBalance.available !== null ? "Bank available" : "Bank balance"} · ${new Date(a.bankBalance.asOf).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+                  : "From recorded transactions"}
+              </p>
+            </div>
+            <button aria-label={`Edit ${a.name}`} className={ghostButtonClass} onClick={() => edit(a)}>
               Edit
             </button>
           </div>
         </div>
         {used !== null && a.creditLimit && (
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <div className="flex-1">
               <Bar value={owedNow} max={a.creditLimit} over={used > 30} />
             </div>
@@ -334,7 +356,15 @@ export function Accounts({ data }: { data: MoneyData }) {
 
   return (
     <div className="flex flex-col gap-4 lg:gap-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-xl font-semibold tracking-tight">Your accounts</h2>
+        <button className={ghostButtonClass} aria-expanded={formOpen} onClick={() => { setEditingId(null); setDraft(blankAccount(defaultScope)); setFormOpen(v => !v); }}>
+          {formOpen ? "Close form" : "Add manual account"}
+        </button>
+      </div>
       {cards.length > 0 && (
+        <details className="text-sm text-zinc-500">
+          <summary className="cursor-pointer">Credit summary from recorded transactions</summary>
         <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3">
           <Stat label="Owed on cards" value={money(cardOwed)} tone={cardOwed > 0 ? "bad" : undefined} />
           <Stat label="Total credit limit" value={cardLimit ? money(cardLimit) : "Not set"} />
@@ -344,8 +374,10 @@ export function Accounts({ data }: { data: MoneyData }) {
             tone={utilization === null ? undefined : utilization > 30 ? "bad" : "good"}
           />
         </div>
+        </details>
       )}
 
+      {formOpen && <div ref={formRef}>
       <Card title={editingId ? "Edit account" : "Add a bank account, card or loan"}>
         <form onSubmit={save} className="grid gap-3 sm:grid-cols-2 sm:items-end lg:grid-cols-3">
           <Field label="Name">
@@ -395,15 +427,13 @@ export function Accounts({ data }: { data: MoneyData }) {
             <button className={buttonClass} disabled={!draft.name.trim()}>
               {editingId ? "Save changes" : "Add account"}
             </button>
-            {editingId && (
-              <>
-                <button type="button" className={ghostButtonClass} onClick={() => { setEditingId(null); setDraft(blankAccount(defaultScope)); }}>
+                <button type="button" className={ghostButtonClass} onClick={() => { setEditingId(null); setDraft(blankAccount(defaultScope)); setFormOpen(false); }}>
                   Cancel
                 </button>
+            {editingId && (
                 <button type="button" className="px-2 text-sm text-rose-600" onClick={remove}>
                   Delete account
                 </button>
-              </>
             )}
           </div>
         </form>
@@ -411,6 +441,7 @@ export function Accounts({ data }: { data: MoneyData }) {
           To record a card payment, use Transactions: pick &quot;Pay a card or move money&quot;.
         </p>
       </Card>
+      </div>}
 
       {data.accounts.length === 0 ? (
         <Card>
