@@ -7,12 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --import tsx --test src/**/*.test.ts"
+    "test": "node --import tsx --test 'src/**/*.test.ts'"
   },
   "dependencies": {
     "@types/pg": "^8.11.10",
     "@types/qrcode": "^1.5.5",
-    "next": "16.4.0",
+    "next": "16.4.3",
     "pdfjs-dist": "6.4.299",
     "pg": "^8.13.1",
     "qrcode": "^1.5.4",
@@ -25,7 +25,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.4.0",
+    "eslint-config-next": "16.4.3",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5"

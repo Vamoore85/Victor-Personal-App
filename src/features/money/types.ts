@@ -317,6 +317,7 @@ export type MoneyData = {
   recurring: RecurringFinding[];
   billScan?: BillScan;
   accountRules?: number; // version of the account clean-up (dedupe, entity assignment) applied
+  billImports?: string[]; // bills already added from a workbook (company|name), so one you delete stays deleted
   docImports: DocImport[];
   briefings: BriefingSnapshot[];
 };

@@ -41,6 +41,8 @@ function normalize(value: unknown): MoneyData {
     billScan: v.billScan && typeof v.billScan === "object" ? v.billScan : undefined,
     // Which account clean-up rules already ran (accounts-fix.ts); dropping it would rerun them on every save.
     accountRules: typeof v.accountRules === "number" ? v.accountRules : undefined,
+    // Bills already added from your workbook (lib/pending-bills.ts); dropping it would bring deleted ones back.
+    billImports: Array.isArray(v.billImports) ? v.billImports : undefined,
     docImports: Array.isArray(v.docImports) ? v.docImports : [],
     briefings: Array.isArray(v.briefings) ? v.briefings : [],
   };

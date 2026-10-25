@@ -1,6 +1,7 @@
 import { gunzipSync, gzipSync } from "node:zlib";
 import { connection } from "next/server";
 import { databaseUrl, dbConfigured, readDoc, writeDoc } from "@/lib/db";
+import { applyPendingBills } from "@/lib/pending-bills";
 import { applyPendingImport } from "@/lib/pending-import";
 import { accountDiag, asMoney, billDiag } from "@/lib/money-doc";
 import { ACCOUNT_RULES, cleanAccounts } from "@/features/money/accounts-fix";
@@ -69,6 +70,13 @@ export async function GET(req: Request) {
         if (saved.ok) doc = { rev: saved.rev, data: fix.data };
         console.log(`money clean-up: accounts ${fix.before} -> ${fix.after}, merged=${fix.merged}, unassigned=${fix.unassigned}, corrected=${fix.corrected.join(",") || "none"}, saved=${saved.ok}`);
       }
+      // Bills waiting in PENDING_BILLS, after the clean-up so each lands on the one copy of its account.
+      const bills = applyPendingBills(doc.data);
+      if (bills) {
+        const saved = await writeDoc(KEY, doc.rev, bills.data);
+        if (saved.ok) doc = { rev: saved.rev, data: bills.data };
+        console.log(`money bills import: added=${bills.added}, saved=${saved.ok}`);
+      }
       console.log(`money accounts: ${accountDiag(doc.data)}`);
       for (const line of billDiag(doc.data).split("\n")) console.log(`money bills check: ${line}`);
     }
@@ -97,8 +105,14 @@ export async function PUT(req: Request) {
   try {
     // A save only lands on the latest copy (rev check), which the clean-up rules already ran on.
     // Older app code didn't carry that marker; keep it, or the rules would run again on the next load.
-    const data = body.data as { accountRules?: unknown };
+    const data = body.data as { accountRules?: unknown; billImports?: unknown };
     if (typeof data.accountRules !== "number") data.accountRules = ACCOUNT_RULES;
+    // Same for the workbook bills already added: keep the list, or deleted ones would come back.
+    if (!Array.isArray(data.billImports)) {
+      const current = await readDoc(KEY);
+      const kept = (current?.data as { billImports?: unknown } | undefined)?.billImports;
+      if (Array.isArray(kept)) data.billImports = kept;
+    }
     const result = await writeDoc(KEY, body.rev, body.data);
     if (!result.ok) return Response.json({ conflict: true, rev: result.current.rev, data: result.current.data }, { status: 409 });
     return Response.json({ rev: result.rev });
