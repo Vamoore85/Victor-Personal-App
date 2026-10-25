@@ -5,10 +5,10 @@ import { TRUST_CONTACT_EMAIL } from "@/config/app";
 
 export const metadata: Metadata = {
   title: "Privacy & Security",
-  description: "How Maverick Personal handles financial data connected through Plaid.",
+  description: "How Maverick Personal handles connected financial accounts and financial email.",
 };
 
-const EFFECTIVE = "October 9, 2026";
+const EFFECTIVE = "October 25, 2026";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -57,10 +57,25 @@ export default function TrustPage() {
           </p>
         </Section>
 
+        <Section title="Information from connected Gmail">
+          <p>
+            The owner can connect Gmail through Google&apos;s own sign-in screen with read-only Gmail permission. The app searches for likely bills and receipts in the period selected by the owner. When automatic checks are enabled, it also checks recent financial emails on a schedule, with the browser closed. Automatic checks can be paused in the app.
+          </p>
+          <p>
+            The app saves sender and subject information, amounts and dates stated in financial emails, source references, and the owner&apos;s filing decisions. It uses that information to organize receipts by year and company and identify recurring bills and expected calendar dates. Email statements are not treated as proof of a bank payment.
+          </p>
+          <p>
+            When original receipt files are requested, the app reads the original email and its attachments. Filed originals may be retained as private encrypted copies for later download. The app does not send, delete, move or mark Gmail messages, and does not receive or store the owner&apos;s Google password. Google access credentials are encrypted on the server.
+          </p>
+          <p>
+            Google account data is used only for these owner-facing features. It is not sold, used for advertising, or used to train general-purpose AI models. Disconnecting Gmail revokes the app&apos;s Google access and stops further reads; previously saved financial records remain until removed by the owner.
+          </p>
+        </Section>
+
         <Section title="How the information is used">
           <p>
             Financial data is used only to show the owner his own balances, spending, budgets and upcoming bills inside this app. It is never
-            sold, rented, shared with third parties, used for advertising, or used to make credit or lending decisions.
+            sold, rented, used for advertising, or used to make credit or lending decisions. The app processes and stores these records on its hosting provider and private database, as described below.
           </p>
         </Section>
 
@@ -80,7 +95,7 @@ export default function TrustPage() {
               reach. It is not open to the public internet API, holds only the owner&apos;s own data, and keeps dated backup versions. A working
               copy is also kept on the owner&apos;s own device.
             </li>
-            <li>Every page and server function of the app, other than this policy, requires the owner&apos;s password plus a one-time code from an authenticator app (multi-factor authentication). Sessions are held in a secure, HTTP-only cookie.</li>
+            <li>Owner-facing pages and server functions, other than public sign-in and policy pages, require the owner&apos;s password plus a one-time code from an authenticator app (multi-factor authentication). Sessions are held in a secure, HTTP-only cookie. The scheduled email worker uses a separate server-only credential, accepts no unauthenticated requests, and returns counts rather than email contents.</li>
             <li>Saved logins in the app&apos;s vault are encrypted on the device with AES-256, using a key derived from a master password.</li>
           </ul>
         </Section>
