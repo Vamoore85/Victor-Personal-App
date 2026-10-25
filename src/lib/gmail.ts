@@ -37,7 +37,7 @@ export const SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 
 export const MAX_DAYS = 180;
 export const MAX_MESSAGES = SCAN_BATCH_SIZE; // save progress frequently while reading older mail
-const MAX_RECHECK = 25;
+const MAX_RECHECK = 5;
 
 export class GmailError extends Error {
   constructor(
@@ -245,7 +245,9 @@ export function searchQuery(from: string, to: string) {
 async function inBatches<T, R>(list: T[], size: number, fn: (x: T) => Promise<R>) {
   const out: R[] = [];
   for (let i = 0; i < list.length; i += size) {
-    if (i) await new Promise(resolve => setTimeout(resolve, 250));
+    // Full-message reads now cost 60 units, against 6,000 units/user/minute.
+    // Four reads every 3 seconds leave room for listing, profile checks and retries.
+    if (i) await new Promise(resolve => setTimeout(resolve, 3000));
     out.push(...(await Promise.all(list.slice(i, i + size).map(fn))));
   }
   return out;
