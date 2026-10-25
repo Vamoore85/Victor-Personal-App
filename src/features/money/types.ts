@@ -230,6 +230,8 @@ export type Institution = {
   memberNumber: string; // last 4 of the account/member/policy number, for reference only
   notes: string;
   scope?: Scope;
+  // What it costs, when no bill is linked to it (Bill.institutionId): an amount you typed, "variable" or "no cost".
+  cost?: { kind: "manual" | "variable" | "none"; amount?: number; period?: "monthly" | "yearly" };
 };
 
 // A bank connected through Plaid. `link` is the connection key, sealed by the
@@ -317,6 +319,7 @@ export type MoneyData = {
   recurring: RecurringFinding[];
   billScan?: BillScan;
   accountRules?: number; // version of the account clean-up (dedupe, entity assignment) applied
+  siteCostRules?: number; // version of the bill-to-website matching applied (site-costs.ts)
   siteImports?: string[]; // websites already added from your directory (company|name), so one you delete stays deleted
   billImports?: string[]; // bills already added from a workbook (company|name), so one you delete stays deleted
   docImports: DocImport[];

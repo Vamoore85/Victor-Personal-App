@@ -6,6 +6,7 @@ import { applyPendingImport } from "@/lib/pending-import";
 import { applyPendingSites } from "@/lib/pending-sites";
 import { accountDiag, asMoney, billDiag } from "@/lib/money-doc";
 import { ACCOUNT_RULES, cleanAccounts } from "@/features/money/accounts-fix";
+import { linkSiteCosts, SITE_COST_RULES } from "@/features/money/site-costs";
 import { sameOrigin, signedIn } from "@/lib/plaid-server";
 
 // Cloud copy of the Financial Center. The browser keeps a local copy too and
@@ -85,6 +86,13 @@ export async function GET(req: Request) {
         if (saved.ok) doc = { rev: saved.rev, data: sites.data };
         console.log(`money sites import: added=${sites.added}, noLink=${sites.noLink}, saved=${saved.ok}`);
       }
+      // Each website's monthly cost, from the one saved bill that clearly belongs to it (see site-costs.ts).
+      const costs = linkSiteCosts(asMoney(doc.data));
+      if (costs) {
+        const saved = await writeDoc(KEY, doc.rev, costs.data);
+        if (saved.ok) doc = { rev: saved.rev, data: costs.data };
+        console.log(`money site costs: linked=${costs.linked}, saved=${saved.ok}`);
+      }
       console.log(`money accounts: ${accountDiag(doc.data)}`);
       for (const line of billDiag(doc.data).split("\n")) console.log(`money bills check: ${line}`);
     }
@@ -113,8 +121,9 @@ export async function PUT(req: Request) {
   try {
     // A save only lands on the latest copy (rev check), which the clean-up rules already ran on.
     // Older app code didn't carry that marker; keep it, or the rules would run again on the next load.
-    const data = body.data as { accountRules?: unknown; billImports?: unknown; siteImports?: unknown };
+    const data = body.data as { accountRules?: unknown; billImports?: unknown; siteImports?: unknown; siteCostRules?: unknown };
     if (typeof data.accountRules !== "number") data.accountRules = ACCOUNT_RULES;
+    if (typeof data.siteCostRules !== "number") data.siteCostRules = SITE_COST_RULES;
     // Same for the workbook bills and websites already added: keep the lists, or deleted ones would come back.
     if (!Array.isArray(data.billImports) || !Array.isArray(data.siteImports)) {
       const current = (await readDoc(KEY))?.data as { billImports?: unknown; siteImports?: unknown } | undefined;

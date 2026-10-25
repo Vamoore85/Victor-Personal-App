@@ -44,6 +44,7 @@ function normalize(value: unknown): MoneyData {
     // Bills already added from your workbook (lib/pending-bills.ts); dropping it would bring deleted ones back.
     billImports: Array.isArray(v.billImports) ? v.billImports : undefined,
     siteImports: Array.isArray(v.siteImports) ? v.siteImports : undefined,
+    siteCostRules: typeof v.siteCostRules === "number" ? v.siteCostRules : undefined,
     docImports: Array.isArray(v.docImports) ? v.docImports : [],
     briefings: Array.isArray(v.briefings) ? v.briefings : [],
   };

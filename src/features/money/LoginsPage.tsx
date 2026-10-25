@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type FormEvent } from "react";
-import { normalizeUrl } from "./calc";
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { money, normalizeUrl } from "./calc";
 import { PasteLogins } from "./logins-paste-ui";
 import { ENTITIES } from "./outlook";
 import { scopeOf, ScopeField } from "./scope";
 import { cloudErrorMessage, cloudReady, newId, retryCloud, setMoneyData, useCloudState, useMoneyData } from "./store";
-import type { Institution, MoneyData, Scope } from "./types";
+import { accountLabel, cleanAccounts } from "./accounts-fix";
+import { lastPayments, siteCost, type LastPayment, type SiteCostView } from "./site-costs";
+import type { Account, Bill, Institution, MoneyData, Scope } from "./types";
 import { Field, inputClass } from "./ui";
 import { useVault, type VaultEntry } from "./vault";
 import { InstitutionLogins, VaultAutoLock, VaultBar } from "./vault-ui";
@@ -85,6 +87,9 @@ function Portal({ data }: { data: MoneyData }) {
     return [s.name, s.type, siteUrl(s), ...own.flatMap((e) => [e.label, e.username, e.url])].some((t) => t?.toLowerCase().includes(q));
   });
   const noLink = sites.filter((s) => !siteUrl(s)).length;
+  const clean = useMemo(() => cleanAccounts(data).data, [data]);
+  const paid = useMemo(() => lastPayments(clean), [clean]);
+  const recorded = shown.filter((s) => paid.has(s.id)).length;
 
   return (
     <div className={`flex flex-col gap-5 ${NAVY}`}>
@@ -100,7 +105,7 @@ function Portal({ data }: { data: MoneyData }) {
         </button>
       </div>
 
-      {adding && <SiteForm onDone={(id) => { setAdding(false); if (id) setOpenId(id); }} />}
+      {adding && <SiteForm bills={data.bills} onDone={(id) => { setAdding(false); if (id) setOpenId(id); }} />}
 
       <div className="relative max-w-3xl">
         <svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke="currentColor" strokeWidth={2} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" aria-hidden="true">
@@ -151,6 +156,7 @@ function Portal({ data }: { data: MoneyData }) {
       <p className="text-sm text-zinc-500">
         {state === "loading" ? "Loading your saved websites…" : `${shown.length} of ${sites.length} website${sites.length === 1 ? "" : "s"}`}
         {state !== "loading" && noLink > 0 && ` · ${noLink} with no link saved`}
+        {state !== "loading" && shown.length > 0 && ` · ${recorded} with a payment found in your bank history`}
       </p>
 
       {sites.length === 0 && state === "loading" ? (
@@ -161,10 +167,12 @@ function Portal({ data }: { data: MoneyData }) {
         </p>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-surface dark:border-zinc-800">
-          <div className="hidden grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)_7rem_auto] gap-4 border-b border-zinc-200 bg-zinc-50 px-5 py-3 text-sm font-semibold md:grid dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="hidden grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_6.5rem_6.5rem_7.5rem_auto] gap-4 border-b border-zinc-200 bg-zinc-50 px-5 py-3 text-sm font-semibold md:grid dark:border-zinc-800 dark:bg-zinc-900">
             <span>Website</span>
             <span>Account</span>
             <span>Group</span>
+            <span className="text-right">Last bill</span>
+            <span>Date taken out</span>
             <span className="w-[17rem]">Actions</span>
           </div>
           <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
@@ -173,6 +181,9 @@ function Portal({ data }: { data: MoneyData }) {
                 key={s.id}
                 site={s}
                 logins={entries.filter((e) => e.institutionId === s.id)}
+                bills={data.bills}
+                payment={paid.get(s.id)}
+                account={clean.accounts.find((a) => a.id === paid.get(s.id)?.accountId)}
                 unlocked={unlocked}
                 open={openId === s.id}
                 onToggle={() => setOpenId(openId === s.id ? null : s.id)}
@@ -202,7 +213,7 @@ function Portal({ data }: { data: MoneyData }) {
   );
 }
 
-function SiteRow({ site, logins, unlocked, open, onToggle }: { site: Institution; logins: VaultEntry[]; unlocked: boolean; open: boolean; onToggle: () => void }) {
+function SiteRow({ site, logins, bills, payment, account, unlocked, open, onToggle }: { site: Institution; logins: VaultEntry[]; bills: Bill[]; payment?: LastPayment; account?: Account; unlocked: boolean; open: boolean; onToggle: () => void }) {
   const [editing, setEditing] = useState(false);
   const url = siteUrl(site);
   const scope = scopeOf(site);
@@ -211,11 +222,9 @@ function SiteRow({ site, logins, unlocked, open, onToggle }: { site: Institution
 
   return (
     <li className="px-4 py-3 md:px-5">
-      <div className="grid grid-cols-[2.25rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 md:grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)_7rem_auto] md:gap-4">
+      <div className="grid grid-cols-[2.25rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 md:grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_6.5rem_6.5rem_7.5rem_auto] md:gap-4">
         <div className="col-span-2 flex min-w-0 items-center gap-3 md:col-span-1">
-          <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-100 font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-            {site.name.trim().charAt(0).toUpperCase()}
-          </span>
+          <SiteLogo name={site.name} url={url} />
           <div className="min-w-0">
             {url ? (
               <a href={url} target="_blank" rel="noopener noreferrer" className={`${TEAL_LINK} break-words`}>
@@ -235,6 +244,7 @@ function SiteRow({ site, logins, unlocked, open, onToggle }: { site: Institution
         <div className="col-start-2 md:col-start-auto">
           <span className={`inline-block rounded-full px-3 py-1 text-xs font-medium ${PILL[scope]}`}>{groupLabel(scope)}</span>
         </div>
+        <PaymentCells payment={payment} account={account} cost={siteCost(site, bills)} />
         <div className="col-span-2 flex gap-2 md:col-span-1 md:w-[17rem]">
           {url ? (
             <a href={url} target="_blank" rel="noopener noreferrer" className={`${TEAL_OUTLINE} flex-1`}>
@@ -254,10 +264,10 @@ function SiteRow({ site, logins, unlocked, open, onToggle }: { site: Institution
           {!unlocked && <VaultBar />}
           <InstitutionLogins institution={site} />
           {editing ? (
-            <SiteForm site={site} onDone={() => setEditing(false)} />
+            <SiteForm site={site} bills={bills} onDone={() => setEditing(false)} />
           ) : (
             <button className="self-start text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100" onClick={() => setEditing(true)}>
-              Edit website name, link or group
+              Edit website, group or saved bill
             </button>
           )}
         </div>
@@ -266,12 +276,85 @@ function SiteRow({ site, logins, unlocked, open, onToggle }: { site: Institution
   );
 }
 
-/** Adds a website, or edits one's name, link and group. Holds no usernames or passwords. */
-function SiteForm({ site, onDone }: { site?: Institution; onDone: (id?: string) => void }) {
+/** The website's own icon (fetched by this app's server, see api/logo), or its first letter when there isn't one. */
+function SiteLogo({ name, url }: { name: string; url: string }) {
+  const host = (() => {
+    try {
+      return url ? new URL(url).hostname.replace(/^www\./, "") : "";
+    } catch {
+      return "";
+    }
+  })();
+  const [failed, setFailed] = useState("");
+  const box = "flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg";
+  if (!host || failed === host) {
+    return (
+      <span aria-hidden="true" className={`${box} bg-zinc-100 font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300`}>
+        {name.trim().charAt(0).toUpperCase()}
+      </span>
+    );
+  }
+  return (
+    <span aria-hidden="true" className={`${box} border border-zinc-200 bg-white p-1 dark:border-zinc-700`}>
+      {/* eslint-disable-next-line @next/next/no-img-element -- a small icon from our own route, not worth image optimization */}
+      <img src={`/api/logo?host=${encodeURIComponent(host)}`} alt="" width={28} height={28} loading="lazy" className="h-full w-full object-contain" onError={() => setFailed(host)} />
+    </span>
+  );
+}
+
+const longDate = (ymd: string) => new Date(`${ymd}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+/**
+ * Last bill and Date taken out: the latest payment found in your bank history.
+ * With none found, a saved bill amount shows as expected, never as paid.
+ */
+function PaymentCells({ payment, account, cost }: { payment?: LastPayment; account?: Account; cost: SiteCostView }) {
+  const none = <span className="text-zinc-400">Not recorded</span>;
+  let amount: ReactNode = none;
+  let note = "";
+  if (payment) {
+    amount = <span className="font-semibold tabular-nums">{money(payment.amount)}</span>;
+  } else if (cost.state === "bills" || cost.state === "manual") {
+    const saved = cost.state === "bills" ? cost.bills.reduce((t, b) => t + b.amount, 0) : (cost.yearly ?? cost.monthly);
+    amount = <span className="tabular-nums">{money(saved)}</span>;
+    note = cost.state === "bills" ? "saved bill, expected" : "set by you, expected";
+  } else if (cost.state === "variable") {
+    amount = "Variable";
+  } else if (cost.state === "none") {
+    amount = <span className="text-zinc-500">No cost</span>;
+  }
+  return (
+    <>
+      <div className="col-start-2 text-sm md:col-start-auto md:text-right">
+        <span className="text-xs text-zinc-500 md:hidden">Last bill: </span>
+        {amount}
+        {note && <span className="block text-xs text-zinc-500">{note}</span>}
+      </div>
+      <div className="col-start-2 text-sm md:col-start-auto">
+        <span className="text-xs text-zinc-500 md:hidden">Taken out: </span>
+        {payment ? <span className="tabular-nums">{longDate(payment.date)}</span> : none}
+        {payment && account && <span className="block truncate text-xs text-zinc-500">from {accountLabel(account)}{account.last4 ? ` ··${account.last4}` : ""}</span>}
+      </div>
+    </>
+  );
+}
+
+type CostChoice = "unset" | "bill" | "manual" | "variable" | "none";
+
+/** Adds a website, or edits one's name, link, group and monthly cost. Holds no usernames or passwords. */
+function SiteForm({ site, bills, onDone }: { site?: Institution; bills: Bill[]; onDone: (id?: string) => void }) {
   const [name, setName] = useState(site?.name ?? "");
   const [url, setUrl] = useState(site ? siteUrl(site) : "");
   const [kind, setKind] = useState(site && !GENERIC.has(site.type.trim().toLowerCase()) ? site.type : "");
   const [scope, setScope] = useState<Scope>(site ? scopeOf(site) : "personal");
+  const linked = site ? bills.find((b) => b.institutionId === site.id) : undefined;
+  const [choice, setChoice] = useState<CostChoice>(linked ? "bill" : site?.cost?.kind ?? "unset");
+  const [billId, setBillId] = useState(linked?.id ?? "");
+  const [amount, setAmount] = useState(site?.cost?.kind === "manual" && site.cost.amount !== undefined ? String(site.cost.amount) : "");
+  const [period, setPeriod] = useState<"monthly" | "yearly">(site?.cost?.period ?? "monthly");
+  // Bills in this group that aren't already another website's cost.
+  const free = bills.filter((b) => (b.scope ?? "personal") === scope && (!b.institutionId || b.institutionId === site?.id));
+  const typed = Number(amount.replace(/[$,\s]/g, ""));
 
   function save(e: FormEvent) {
     e.preventDefault();
@@ -280,11 +363,20 @@ function SiteForm({ site, onDone }: { site?: Institution; onDone: (id?: string) 
     const link = normalizeUrl(url);
     const id = site?.id ?? newId();
     const type = kind.trim() || (site ? site.type : "Website");
+    const cost: Institution["cost"] =
+      choice === "manual" && Number.isFinite(typed) && amount.trim() ? { kind: "manual", amount: typed, period } : choice === "variable" || choice === "none" ? { kind: choice } : undefined;
+    const pick = choice === "bill" ? billId : "";
     setMoneyData((d) => ({
       ...d,
       institutions: site
-        ? d.institutions.map((i) => (i.id === site.id ? { ...i, name: n, type, scope, ...(i.loginUrl ? { loginUrl: link } : { website: link }) } : i))
-        : [...d.institutions, { id, name: n, type, website: link, loginUrl: "", phone: "", memberNumber: "", notes: "", scope }],
+        ? d.institutions.map((i) => (i.id === site.id ? { ...i, name: n, type, scope, cost, ...(i.loginUrl ? { loginUrl: link } : { website: link }) } : i))
+        : [...d.institutions, { id, name: n, type, website: link, loginUrl: "", phone: "", memberNumber: "", notes: "", scope, cost }],
+      // Only which website a bill belongs to changes; its amount and schedule stay as they are.
+      bills: d.bills.map((b) => {
+        if (b.id === pick) return { ...b, institutionId: id };
+        if (b.institutionId === id) return { ...b, institutionId: undefined };
+        return b;
+      }),
     }));
     onDone(site ? undefined : id);
   }
@@ -301,8 +393,47 @@ function SiteForm({ site, onDone }: { site?: Institution; onDone: (id?: string) 
         <input className={inputClass} value={kind} onChange={(e) => setKind(e.target.value)} placeholder="Car insurance" />
       </Field>
       <ScopeField value={scope} onChange={setScope} />
+      <Field label="Saved bill amount">
+        <select className={inputClass} value={choice} onChange={(e) => setChoice(e.target.value as CostChoice)}>
+          <option value="unset">Not set</option>
+          <option value="bill">From one of your bills</option>
+          <option value="manual">Type an amount</option>
+          <option value="variable">Variable</option>
+          <option value="none">No cost</option>
+        </select>
+      </Field>
+      {choice === "bill" && (
+        <div className="sm:col-span-1 lg:col-span-3">
+          <Field label="Bill">
+            <select className={inputClass} value={billId} onChange={(e) => setBillId(e.target.value)}>
+              <option value="">Pick a bill…</option>
+              {free.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}: {money(b.amount)} {b.frequency === "monthly" ? "a month" : `(${b.frequency})`}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {free.length === 0 && <p className="mt-1 text-xs text-zinc-500">No unlinked bills in this group. Add the bill under Money → Bills first.</p>}
+        </div>
+      )}
+      {choice === "manual" && (
+        <>
+          <Field label="Amount">
+            <input className={inputClass} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
+          </Field>
+          <Field label="Billed">
+            <select className={inputClass} value={period} onChange={(e) => setPeriod(e.target.value as "monthly" | "yearly")}>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly (shown as a monthly amount)</option>
+            </select>
+          </Field>
+        </>
+      )}
       <div className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:col-span-4">
-        <button className={TEAL_BUTTON} disabled={!name.trim()}>{site ? "Save" : "Add website"}</button>
+        <button className={TEAL_BUTTON} disabled={!name.trim() || (choice === "bill" && !billId) || (choice === "manual" && !(amount.trim() && Number.isFinite(typed)))}>
+          {site ? "Save" : "Add website"}
+        </button>
         <button type="button" className={PLAIN_OUTLINE} onClick={() => onDone()}>Cancel</button>
         {!site && <span className="text-xs text-zinc-500">Next, save the username and password under Login details. They&apos;re kept in your vault.</span>}
       </div>
