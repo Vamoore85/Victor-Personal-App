@@ -5,6 +5,7 @@ import type { EmailItem } from "./parse";
 export type EmailRecurringBill = {
   key: string; name: string; frequency: BillFrequency; evidence: string;
   latest: EmailItem; emailIds: string[]; scope: Scope | null; billId?: string;
+  findingId?: string;
   reason: string; ready: boolean;
 };
 
@@ -56,12 +57,14 @@ export function recurringEmailBills(items: EmailItem[], data: MoneyData, today: 
     const scope = scopes.length === 1 ? scopes[0] : scopes.length > 1 ? null : suggestScope(latest, data.institutions, data.bills).scope;
     const same = scope === null ? [] : matchingBills(latest, scope, data.bills);
     const matches = data.bills.filter(b => b.emailSource?.key === key || group.some(i => i.billId === b.id) || same.includes(b) || (scope !== null && (b.scope ?? "personal") === scope && clean(b.name) === clean(latest.merchant)));
+    const bankMatches = data.recurring.filter(f => f.direction === "out" && f.scope === scope && clean(f.merchant) === clean(latest.merchant));
+    const editedFinding = !matches.length && bankMatches.some(f => f.overrides && Object.keys(f.overrides).length > 0);
     const exact = matches.length === 1 && scopes.length <= 1 && !overlapping ? matches[0] : undefined;
     const validAmount = latest.currency === "USD" && latest.amount !== null && latest.amount > 0 && (!latest.flags.length || latest.status === "confirmed");
     const current = Boolean(latest.dueDate && latest.dueDate >= today);
-    const removed = (data.emailBillImports ?? []).includes(key) && !exact;
-    const reason = overlapping ? "Multiple billing dates—check the plans or accounts" : exact ? "Linked to your saved bill" : removed ? "Previously removed from Bills" : matches.length > 1 ? "Multiple saved bills match—check the account" : scope === null ? "Choose Personal, Maverick or Gladiator" : !validAmount ? "Check the amount or currency" : !latest.dueDate ? "Needs a due date" : !current ? "Historical bill—needs a current due date" : "Ready for Bills and calendar";
-    out.push({ key, name: latest.merchant, ...repeat, latest, emailIds: group.map(i => i.id), scope, billId: exact?.id, reason, ready: !exact && !removed && !overlapping && matches.length === 0 && scope !== null && validAmount && current });
+    const removed = !exact && ((data.emailBillImports ?? []).includes(key) || bankMatches.some(f => f.status === "dismissed" || f.billId && !data.bills.some(b => b.id === f.billId)));
+    const reason = overlapping ? "Multiple billing dates—check the plans or accounts" : exact ? "Linked to your saved bill" : removed ? "Previously removed from Bills" : editedFinding ? "Saved recurring entry has edits—check the details" : matches.length > 1 || bankMatches.length > 1 ? "Multiple saved bills match—check the account" : scope === null ? "Choose Personal, Maverick or Gladiator" : !validAmount ? "Check the amount or currency" : !latest.dueDate ? "Needs a due date" : !current ? "Historical bill—needs a current due date" : "Ready for Bills and calendar";
+    out.push({ key, name: latest.merchant, ...repeat, latest, emailIds: group.map(i => i.id), scope, billId: exact?.id, findingId: bankMatches.length === 1 ? bankMatches[0].id : undefined, reason, ready: !exact && !removed && !overlapping && !editedFinding && matches.length === 0 && bankMatches.length <= 1 && scope !== null && validAmount && current });
   }
   return out.sort((a,b) => b.latest.emailDate.localeCompare(a.latest.emailDate));
 }
@@ -69,6 +72,7 @@ export function recurringEmailBills(items: EmailItem[], data: MoneyData, today: 
 /** Idempotent: link existing bills; add only clear, current, owned obligations. Never creates bank payments. */
 export function applyRecurringEmails(data: MoneyData, items: EmailItem[], today: string): { data: MoneyData; added: number; linked: number } {
   let bills = data.bills;
+  let recurring = data.recurring;
   const imported = new Set(data.emailBillImports ?? []);
   let added = 0, linked = 0;
   for (const candidate of recurringEmailBills(items, data, today)) {
@@ -84,8 +88,12 @@ export function applyRecurringEmails(data: MoneyData, items: EmailItem[], today:
       imported.add(candidate.key); linked++;
     } else if (candidate.ready && candidate.scope && candidate.latest.amount !== null && candidate.latest.dueDate) {
       const bill: Bill = { id: `email:${candidate.key}`, name: candidate.name, amount: candidate.latest.amount, category: "Bills", frequency: candidate.frequency, nextDue: candidate.latest.dueDate, dueDay: Number(candidate.latest.dueDate.slice(8,10)), accountId: "", autopay: false, scope: candidate.scope, emailSource: { key: candidate.key, ids: [...candidate.emailIds].sort(), evidence: candidate.evidence, created: true }, note: "Recurring bill found in email. Due date and amount are expected; payment is verified separately from bank activity." };
+      if (candidate.findingId) {
+        bill.recurringId = candidate.findingId;
+        recurring = recurring.map(f => f.id === candidate.findingId ? { ...f, status: "confirmed", billId: bill.id, overrides: { amount:bill.amount, nextDate:bill.nextDue, cadence:bill.frequency === "once" ? "irregular" : bill.frequency } } : f);
+      }
       bills = [...bills, bill]; imported.add(candidate.key); added++;
     }
   }
-  return { data: added || linked ? { ...data, bills, emailBillImports: [...imported] } : data, added, linked };
+  return { data: added || linked ? { ...data, bills, recurring, emailBillImports: [...imported] } : data, added, linked };
 }

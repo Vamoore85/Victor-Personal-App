@@ -20,6 +20,11 @@ export function scanRange(days: number, today: string, year?: number) {
 
 export const scanKey = (from: string, to: string) => `v1:${from}:${to}`;
 
+export function claimMailScan(scans: Record<string, ScanCursor>, key: string, id: string, now: number, restart = false) {
+  if (Object.entries(scans).some(([range,scan]) => range !== key && scan.lease && scan.lease.until > now)) throw new Error("Another email scan is running. Saved progress will continue when it finishes.");
+  return claimScan(scans[key],id,now,restart);
+}
+
 export function claimScan(previous: ScanCursor | undefined, id: string, now: number, restart = false): ScanCursor {
   if (previous?.lease && previous.lease.until > now) throw new Error("A scan for this period is already running. Wait for it to finish.");
   const cursor = restart || !previous || previous.complete ? { retryIds: [], looked: 0, kept: 0, complete: false } : previous;

@@ -1,8 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { claimScan, collectScanBatch, scanKey, scanRange, type ScanCursor } from "./scan-history";
+import { claimMailScan, claimScan, collectScanBatch, scanKey, scanRange, type ScanCursor } from "./scan-history";
 
 const empty = (): ScanCursor => ({ retryIds: [], looked: 0, kept: 0, complete: false });
+
+test("automatic and history scans share one mailbox read lease",()=> {
+  const history=claimScan(empty(),"history",1000);
+  assert.throws(()=>claimMailScan({history},"recent","automatic",1001),/Another email scan/);
+  assert.equal(claimMailScan({history},"recent","automatic",151001).lease?.id,"automatic");
+  assert.throws(()=>claimMailScan({history},"history","second",1001),/already running/);
+});
 
 test("full years include January through December, current year stops at today", () => {
   assert.deepEqual(scanRange(90, "2026-10-25", 2024), { from: "2024-01-01", to: "2024-12-31" });
