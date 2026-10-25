@@ -3,6 +3,7 @@ import { dbConfigured, getFile, putFile, readDoc, writeDoc } from "@/lib/db";
 import { extract, mergeFound, RULES, type EmailItem, type EmailStatus, type RawMessage } from "@/features/gmail/parse";
 import type { Scope } from "@/features/money/types";
 import { claimScan, collectScanBatch, scanKey, scanRange, type ScanCursor } from "@/features/gmail/scan-history";
+import { gmailFailure } from "@/features/gmail/api-errors";
 
 /*
  * Read-only Gmail link that finds bills and receipts.
@@ -153,13 +154,13 @@ const saveConnection = (tokens: Tokens, email: string, connectedAt: string) =>
   put(CONNECTION_DOC, () => ({ sealed: seal(tokens), email, connectedAt }) satisfies Connection);
 
 async function api<T>(tokens: Tokens, path: string): Promise<T> {
-  const res = await fetch(`${API}${path}`, { headers: { Accept: "application/json", Authorization: `Bearer ${tokens.access}` }, cache: "no-store" });
-  if (res.status === 401) throw new GmailError("Google signed this site out of Gmail. Press Connect Gmail again.", 401);
-  if (res.status === 403) throw new GmailError("Google refused the request. Check that the Gmail API is turned on for your Google Cloud project.", 403);
-  if (res.status === 404) throw new GmailError("That email is no longer available in Gmail.", 404);
-  if (res.status === 400) throw new GmailError("Gmail could not continue this scan. Press Restart period to begin this period again.", 400);
-  if (!res.ok) throw new GmailError(`Gmail returned an error (${res.status}).`, 502);
-  return (await res.json()) as T;
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${API}${path}`, { headers: { Accept: "application/json", Authorization: `Bearer ${tokens.access}` }, cache: "no-store" });
+    if (res.ok) return (await res.json()) as T;
+    const failure = gmailFailure(res.status, await res.json().catch(() => null));
+    if (!failure.retry || attempt >= 2) throw new GmailError(failure.message, failure.status);
+    await new Promise(resolve => setTimeout(resolve, 1000 * 2 ** attempt));
+  }
 }
 
 /** Finishes the sign-in Google redirected back with. */
@@ -243,7 +244,10 @@ export function searchQuery(from: string, to: string) {
 
 async function inBatches<T, R>(list: T[], size: number, fn: (x: T) => Promise<R>) {
   const out: R[] = [];
-  for (let i = 0; i < list.length; i += size) out.push(...(await Promise.all(list.slice(i, i + size).map(fn))));
+  for (let i = 0; i < list.length; i += size) {
+    if (i) await new Promise(resolve => setTimeout(resolve, 250));
+    out.push(...(await Promise.all(list.slice(i, i + size).map(fn))));
+  }
   return out;
 }
 
@@ -275,7 +279,7 @@ export async function scan(days: number, today: string, options: { year?: number
     const stale = saved.items.filter(i => (i.rules ?? 0) < RULES).slice(0, MAX_RECHECK);
     const foundAt = new Date().toISOString();
     const retryIds: string[] = [];
-    const found = (await inBatches(batch.ids.filter(id => !known.has(id)), 8, async id => {
+    const found = (await inBatches(batch.ids.filter(id => !known.has(id)), 4, async id => {
       try { return extract(await api<RawMessage>(tokens, `/messages/${encodeURIComponent(id)}?format=full&fields=id,internalDate,payload`), foundAt); }
       catch (e) {
         if (e instanceof GmailError && [401, 403].includes(e.status)) throw e;
@@ -285,7 +289,7 @@ export async function scan(days: number, today: string, options: { year?: number
     })).filter((x): x is EmailItem => x !== null);
     // Preserve the newer parser's migration: repair source links and move untouched false finds out.
     const again = new Map<string, EmailItem | null>();
-    await inBatches(stale, 8, async item => {
+    await inBatches(stale, 4, async item => {
       try { again.set(item.id, extract(await api<RawMessage>(tokens, `/messages/${encodeURIComponent(item.id)}?format=full&fields=id,internalDate,payload`), foundAt)); }
       catch (e) { if (e instanceof GmailError && [401, 403].includes(e.status)) throw e; }
     });
