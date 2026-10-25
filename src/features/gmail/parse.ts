@@ -14,7 +14,9 @@ export type EmailKind = "bill" | "receipt";
 export type EmailStatus = "review" | "confirmed" | "ignored" | "duplicate";
 
 export type EmailItem = {
-  id: string; // Gmail's message id, used for the "Open in Gmail" link
+  id: string; // Gmail's message id
+  messageId?: string; // the email's own Message-ID header, which the "Open in Gmail" link searches for
+  rules?: number; // the RULES version it was last checked with
   kind: EmailKind;
   merchant: string;
   fromDomain: string;
@@ -111,11 +113,21 @@ const RECEIPT = /\b(receipt|payment (received|confirmation|confirmed|processed|p
 const BILL = /\b(amount due|total due|balance due|payment (is )?due|due date|minimum payment|(new |your )?statement (is )?(ready|available)|new statement|e-?statement|(your )?bill (is )?(ready|available)|your (monthly |new )?bill|invoice|auto-?pay (is )?(scheduled|reminder|set)|upcoming payment|payment reminder|premium (is )?due|renewal)\b/i;
 const NOISE = /(\d+% off|\bsale\b|\bdeals?\b|\boffers?\b|\bcoupon|\bsave \$|\bwebinar|\bnewsletter|\bverification code|\bsecurity (code|alert)|\bpassword|\bsign[- ]in|\blog[- ]?in\b|\bshipped\b|\bout for delivery|\bdelivered\b|\bsurvey\b|\breview your)/i;
 
+// Holds and pre-approvals aren't charges yet; the bank shows what actually posts.
+const HOLD = /\b(pending (authori[sz]ation|charge|transaction|payment authori[sz]ation)|authori[sz]ation (hold|request|notice)|temporary (hold|authori[sz]ation)|pre-?authori[sz](ation|ed))\b/i;
+// Account and service notices that mention payments without being a bill or receipt.
+const NOTICE = /(\bterms (of (service|use)|and conditions)|\bprivacy (policy|notice|statement)|\bpolicy (update|change)|\bservice (update|notice|notification|alert|announcement|change)|\baccount (update|notice|notification|alert|activity|settings|information)|\bimportant (information|update|notice|changes)|\bchanges? to (your|our)\b|\bmaintenance\b|\boutage\b|\bwelcome to\b|\bconfirm your (email|account|identity)|\bnew device\b|\bupdate your (payment|card|billing) (method|info|information|details)|\bpayment method (updated|added|expir)|\bcard (is )?expiring|\bwe('re| are) (updating|changing))/i;
+
+/** Bumped when the rules below change, so items found earlier get checked again. */
+export const RULES = 2;
+
 export function kindOf(subject: string, text: string): EmailKind | null {
   const head = `${subject}\n${text.slice(0, 3000)}`;
   const receipt = RECEIPT.test(head);
   const bill = BILL.test(head);
-  if (NOISE.test(subject) && !RECEIPT.test(subject) && !BILL.test(subject)) return null;
+  const subjectSays = RECEIPT.test(subject) || BILL.test(subject);
+  if (HOLD.test(subject) || HOLD.test(text.slice(0, 1500))) return null;
+  if ((NOISE.test(subject) || NOTICE.test(subject)) && !subjectSays) return null;
   // "Thank you for your payment" is a receipt even when it repeats the amount that was due.
   if (receipt && (!bill || RECEIPT.test(subject) || /thank(s| you) for your payment|payment (received|confirmation|posted)/i.test(head))) return "receipt";
   if (bill) return "bill";
@@ -159,9 +171,9 @@ export function amounts(text: string): Candidate[] {
   return out;
 }
 
-export function pickAmount(text: string): { amount: number | null; currency: string; evidence: string; flags: string[] } {
+export function pickAmount(text: string): { amount: number | null; currency: string; evidence: string; flags: string[]; labeled: boolean } {
   const all = amounts(text);
-  if (!all.length) return { amount: null, currency: "USD", evidence: "", flags: ["No amount found in the email."] };
+  if (!all.length) return { amount: null, currency: "USD", evidence: "", flags: ["No amount found in the email."], labeled: false };
   const best = Math.min(...all.map((c) => c.rank));
   const top = all.filter((c) => c.rank === best);
   const values = [...new Set(top.map((c) => c.amount))];
@@ -169,7 +181,7 @@ export function pickAmount(text: string): { amount: number | null; currency: str
   if (values.length > 1) flags.push("The email shows more than one amount; check which one is the bill.");
   if (best === 4) flags.push("The amount wasn't labeled as a total or amount due.");
   if (top[0].note) flags.push(top[0].note);
-  return { amount: top[0].amount, currency: top[0].currency, evidence: top[0].line, flags };
+  return { amount: top[0].amount, currency: top[0].currency, evidence: top[0].line, flags, labeled: best < 4 };
 }
 
 /* ---- Dates the email states ---- */
@@ -237,13 +249,18 @@ export function extract(msg: RawMessage, foundAt: string): EmailItem | null {
   const ms = Number(msg.internalDate);
   const emailDate = new Date(Number.isFinite(ms) && ms > 0 ? ms : Date.parse(header(p, "Date")) || Date.now()).toISOString().slice(0, 10);
   const body = `${subject}\n${text}`;
-  const { amount, currency, evidence, flags } = pickAmount(body);
+  const { amount, currency, evidence, flags, labeled } = pickAmount(body);
   const due = kind === "bill" ? labeledDate(body, DUE_LABEL, emailDate) : null;
   const billed = labeledDate(body, BILL_LABEL, emailDate);
   if (amount === null && !due) return null; // nothing usable: no amount and no due date
+  // Only the body mentions a payment, and the amount isn't labeled as owed or paid: a notice, not a bill.
+  if (!RECEIPT.test(subject) && !BILL.test(subject) && !labeled && !due) return null;
   if (due?.yearGuessed || billed?.yearGuessed) flags.push("The email left out the year; it was taken from when the email came.");
+  const messageId = header(p, "Message-ID").replace(/^\s*<|>\s*$/g, "").slice(0, 300);
   return {
     id: msg.id,
+    ...(messageId ? { messageId } : {}),
+    rules: RULES,
     kind,
     merchant,
     fromDomain: domain,

@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { dbConfigured, readDoc, writeDoc, getFile, putFile } from "@/lib/db";
-import { extract, mergeFound, type EmailItem, type EmailStatus, type RawMessage } from "@/features/gmail/parse";
+import { dbConfigured, getFile, putFile, readDoc, writeDoc } from "@/lib/db";
+import { extract, mergeFound, RULES, type EmailItem, type EmailStatus, type RawMessage } from "@/features/gmail/parse";
 import type { Scope } from "@/features/money/types";
 
 /*
@@ -20,7 +20,7 @@ import type { Scope } from "@/features/money/types";
 export type GoogleKeys = { clientId: string; secret: string };
 type Tokens = { access: string; accessExpires: number; refresh: string; scope: string };
 type Connection = { sealed: string; email: string; connectedAt: string };
-export type ScanInfo = { from: string; to: string; at: string; looked: number; kept: number; added: number; duplicates: number; capped: boolean };
+export type ScanInfo = { from: string; to: string; at: string; looked: number; kept: number; added: number; duplicates: number; capped: boolean; rechecked?: number; movedOut?: number };
 export type EmailDoc = { items: EmailItem[]; lastScan: ScanInfo | null };
 
 const KEYS_DOC = "gmail-keys";
@@ -34,7 +34,9 @@ const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 export const SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 
 export const MAX_DAYS = 180;
-export const MAX_MESSAGES = 400;
+export const MAX_MESSAGES = 400; // emails read per scan; the next scan carries on with the rest
+const MAX_LISTED = 3000; // ids are cheap to list, so emails already saved don't use up a scan
+const MAX_RECHECK = 150;
 
 export class GmailError extends Error {
   constructor(
@@ -194,30 +196,13 @@ export async function disconnect() {
   if (dbConfigured()) await put(CONNECTION_DOC, () => ({}));
 }
 
+/** The Gmail address that's connected, or null. */
+export const connectedEmail = async () => (await readConnection().catch(() => null))?.conn.email || null;
+
 export async function readItems(): Promise<EmailDoc> {
   if (!dbConfigured()) return { items: [], lastScan: null };
   const d = (await readDoc(ITEMS_DOC))?.data as Partial<EmailDoc> | null;
   return { items: Array.isArray(d?.items) ? d.items : [], lastScan: d?.lastScan ?? null };
-}
-
-/** An original receipt email, including its MIME attachments, encrypted in the private file store.
- * Only explicitly reviewed receipts can be archived. No Gmail message is changed. */
-export async function receiptOriginal(id: string): Promise<Buffer> {
-  needDb();
-  if (!/^[a-f0-9]{1,64}$/i.test(id)) throw new GmailError("Invalid receipt ID.");
-  const item = (await readItems()).items.find(i => i.id === id);
-  if (!item || item.kind !== "receipt" || item.status !== "confirmed" || !item.scope) throw new GmailError("Review and assign this receipt first.", 409);
-  const key = `gmail-receipt-original-${id}`;
-  const cached = await getFile(key);
-  if (cached) return Buffer.from(unseal<{ raw: string }>(cached.data.toString("utf8")).raw, "base64url");
-  const keys = await getKeys();
-  if (!keys) throw new GmailError("Connect Gmail to retrieve the original receipt.", 409);
-  const raw = await api<{ raw?: string }>(await freshTokens(keys), `/messages/${encodeURIComponent(id)}?format=raw`);
-  if (!raw.raw || !/^[A-Za-z0-9_=-]+$/.test(raw.raw)) throw new GmailError("Gmail did not return the original receipt.", 502);
-  const original = Buffer.from(raw.raw, "base64url");
-  if (original.length > 16 * 1024 * 1024) throw new GmailError("This email is over 16 MB. Save its original directly in Gmail.", 413);
-  await putFile(key, "application/octet-stream", Buffer.from(seal({ raw: raw.raw })));
-  return original;
 }
 
 export async function status() {
@@ -268,40 +253,57 @@ export async function scan(days: number, today: string) {
   const span = Math.min(MAX_DAYS, Math.max(1, Math.round(days)));
   const from = addDays(today, -(span - 1));
   const tokens = await freshTokens(keys);
+  const saved = await readItems();
+  const known = new Set(saved.items.map((i) => i.id));
   const ids: string[] = [];
   let page: string | undefined;
   do {
-    const q = new URLSearchParams({ q: searchQuery(from, today), maxResults: "100", ...(page ? { pageToken: page } : {}) });
+    const q = new URLSearchParams({ q: searchQuery(from, today), maxResults: "500", ...(page ? { pageToken: page } : {}) });
     const res = await api<{ messages?: { id: string }[]; nextPageToken?: string }>(tokens, `/messages?${q}`);
     ids.push(...(res.messages ?? []).map((m) => m.id));
     page = res.nextPageToken;
-  } while (page && ids.length < MAX_MESSAGES);
-  const capped = Boolean(page) || ids.length > MAX_MESSAGES;
-  const look = ids.slice(0, MAX_MESSAGES);
+  } while (page && ids.length < MAX_LISTED);
+  const fresh = ids.filter((id) => !known.has(id));
 
-  const saved = await readItems();
-  const known = new Set(saved.items.map((i) => i.id));
+  // Emails found under older rules are read again: still-unreviewed ones the
+  // rules now say aren't bills move to "Not bills", and every one gets the
+  // link to its exact message.
+  const stale = saved.items.filter((i) => (i.rules ?? 0) < RULES).slice(0, MAX_RECHECK);
+  const look = fresh.slice(0, MAX_MESSAGES - stale.length);
+  const capped = Boolean(page) || fresh.length > look.length;
+
   const foundAt = new Date().toISOString();
-  const fresh = look.filter((id) => !known.has(id));
-  const found = (
-    await inBatches(fresh, 8, (id) =>
-      api<RawMessage>(tokens, `/messages/${encodeURIComponent(id)}?format=full&fields=id,internalDate,payload`)
-        .then((m) => extract(m, foundAt))
-        .catch((e) => {
-          if (e instanceof GmailError && e.status === 401) throw e;
-          return null; // one unreadable message doesn't stop the scan
-        }),
-    )
-  ).filter((x): x is EmailItem => x !== null);
+  const read = (id: string) =>
+    api<RawMessage>(tokens, `/messages/${encodeURIComponent(id)}?format=full&fields=id,internalDate,payload`)
+      .then((m) => ({ ok: true as const, item: extract(m, foundAt) }))
+      .catch((e) => {
+        if (e instanceof GmailError && e.status === 401) throw e;
+        return { ok: false as const, item: null }; // one unreadable message doesn't stop the scan
+      });
+  const found = (await inBatches(look, 8, read)).map((r) => r.item).filter((x): x is EmailItem => x !== null);
+  const again = new Map((await inBatches(stale, 8, (i) => read(i.id))).flatMap((r, n) => (r.ok ? [[stale[n].id, r.item] as const] : [])));
 
   let info: ScanInfo | null = null;
   await put(ITEMS_DOC, (current) => {
     const d = (current ?? {}) as Partial<EmailDoc>;
-    const merged = mergeFound(Array.isArray(d.items) ? d.items : [], found);
-    info = { from, to: today, at: foundAt, looked: look.length, kept: found.length, added: merged.added, duplicates: merged.duplicates, capped };
+    let movedOut = 0;
+    const kept = (Array.isArray(d.items) ? d.items : []).map((i) => {
+      if (!again.has(i.id)) return i;
+      const now = again.get(i.id) ?? null;
+      const next: EmailItem = { ...i, rules: RULES, ...(now?.messageId ? { messageId: now.messageId } : {}) };
+      // Only items you haven't touched move; anything you reviewed stays as you left it.
+      if (!now && i.status === "review" && !i.scope && !i.billId) {
+        movedOut++;
+        next.status = "ignored";
+        next.flags = [...i.flags, `Maverick's updated rules say this isn't a bill or receipt. Press "It is a bill" if it is one.`];
+      }
+      return next;
+    });
+    const merged = mergeFound(kept, found);
+    info = { from, to: today, at: foundAt, looked: look.length, kept: found.length, added: merged.added, duplicates: merged.duplicates, capped, rechecked: again.size, movedOut };
     return { items: merged.items, lastScan: info } satisfies EmailDoc;
   });
-  console.log(`gmail scan: days=${span} looked=${look.length} kept=${found.length} capped=${capped}`); // counts only
+  console.log(`gmail scan: days=${span} listed=${ids.length} looked=${look.length} kept=${found.length} rechecked=${again.size} capped=${capped}`); // counts only
   return info!;
 }
 
@@ -366,4 +368,54 @@ export async function review(c: ReviewChange) {
     return { items, lastScan: d.lastScan ?? null } satisfies EmailDoc;
   });
   return item!;
+}
+
+/* ---- Originals for downloads ---- */
+
+const ORIGINAL = (id: string) => `gmail-receipt-original-${id}`;
+const MAX_ORIGINAL = 16 * 1024 * 1024;
+
+async function archived(id: string): Promise<Buffer | null> {
+  const f = await getFile(ORIGINAL(id)).catch(() => null);
+  if (!f) return null;
+  try {
+    return Buffer.from(unseal<{ raw: string }>(f.data.toString("utf8")).raw, "base64url");
+  } catch {
+    return null; // sealed with an older site password
+  }
+}
+
+/**
+ * A reader for the original emails, exactly as Gmail has them (.eml, with
+ * their attachments). Emails you've filed under a company are kept as a
+ * private, encrypted copy the first time they're read, so the receipt
+ * survives even if the email is later deleted in Gmail. Only reads Gmail;
+ * nothing in the mailbox changes.
+ */
+export async function originalsReader(): Promise<{ read: (id: string, keep: boolean) => Promise<Buffer | null>; why: string | null }> {
+  let tokens: Tokens | null = null;
+  let why: string | null = null;
+  const keys = await getKeys().catch(() => null);
+  if (!keys) why = "Gmail isn't set up, so emails without a saved copy aren't included.";
+  else {
+    try {
+      tokens = await freshTokens(keys);
+    } catch (e) {
+      why = e instanceof GmailError ? `${e.message} Emails without a saved copy aren't included.` : "Couldn't reach Gmail, so emails without a saved copy aren't included.";
+    }
+  }
+  return {
+    why,
+    read: async (id, keep) => {
+      if (!/^[a-f0-9]{1,64}$/i.test(id)) return null;
+      const saved = await archived(id);
+      if (saved || !tokens) return saved;
+      const m = await api<{ raw?: string }>(tokens, `/messages/${encodeURIComponent(id)}?format=raw&fields=raw`).catch(() => null);
+      if (!m?.raw || !/^[A-Za-z0-9_=-]+$/.test(m.raw)) return null;
+      const original = Buffer.from(m.raw, "base64url");
+      if (original.length > MAX_ORIGINAL) return null;
+      if (keep) await putFile(ORIGINAL(id), "application/octet-stream", Buffer.from(seal({ raw: m.raw }))).catch(() => undefined);
+      return original;
+    },
+  };
 }

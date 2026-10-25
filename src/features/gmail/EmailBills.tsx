@@ -9,7 +9,7 @@ import { Card, Field, buttonClass, ghostButtonClass, inputClass } from "@/featur
 import { addDays, prettyDate, today } from "@/lib/dates";
 import { gmailLink, suggestBill, suggestScope } from "./match";
 import type { EmailItem } from "./parse";
-import { ReceiptFolders } from "./ReceiptFolders";
+import { ReceiptFolders } from "@/features/receipts/ReceiptFolders";
 
 /*
  * Email bills: a read-only Gmail link that finds bills and receipts in a date
@@ -18,7 +18,7 @@ import { ReceiptFolders } from "./ReceiptFolders";
  * The Google keys and sign-in tokens stay on the server (src/lib/gmail.ts).
  */
 
-type ScanInfo = { from: string; to: string; at: string; looked: number; kept: number; added: number; duplicates: number; capped: boolean };
+type ScanInfo = { from: string; to: string; at: string; looked: number; kept: number; added: number; duplicates: number; capped: boolean; rechecked?: number; movedOut?: number };
 type Status = {
   database: boolean;
   keys: boolean;
@@ -103,7 +103,7 @@ export function EmailBillsScreen() {
         <>
           <Connection status={status} reload={load} />
           {status.connected && <Scan status={status} reload={load} />}
-          <ReceiptFolders items={status.items} />
+          <ReceiptFolders />
           {status.items.length > 0 && <Review status={status} reload={load} onItem={onItem} />}
         </>
       )}
@@ -118,7 +118,7 @@ function ScopeNote() {
       <ul className="mt-2 list-disc space-y-1 pl-5 text-zinc-600 dark:text-zinc-400">
         <li>Only when you press Scan, and only the date range you pick (90 days unless you choose another).</li>
         <li>Only emails that look like bills or receipts. Chats, promotions, social and forum mail are skipped, and an email that isn&apos;t a bill or receipt is dropped without saving anything from it.</li>
-        <li>A scan saves the sender, subject, amount, dates and source reference. Download folder also retrieves and privately archives the original reviewed receipt emails, including their attachments, so they can be included in your ZIP.</li>
+        <li>A scan saves the sender, subject, amount, dates and source reference. Download ZIP on Receipt folders reads the original emails, attachments included, and keeps a private encrypted copy of the ones you&apos;ve filed under a company.</li>
         <li>Read-only. It can&apos;t send, delete, move or mark email, and it never asks for your Google password: Google&apos;s own screen does the sign-in.</li>
         <li>Disconnect any time below, or at your Google account&apos;s Third-party connections page.</li>
       </ul>
@@ -181,32 +181,30 @@ function Connection({ status, reload }: { status: Status; reload: () => Promise<
   );
 }
 
+// Your Google Cloud project for this site. The other project, Maverick Life OS, isn't used.
+const GOOGLE_PROJECT = "tonal-plasma-512713-h4";
+const cloud = (page: string) => `https://console.cloud.google.com/${page}?project=${GOOGLE_PROJECT}`;
+
 function Setup({ redirectUri, onSaved }: { redirectUri: string; onSaved: () => Promise<void> }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex flex-col gap-4 text-sm">
-      <p className="text-zinc-600 dark:text-zinc-400">Google needs to know about your site once before it will show its sign-in screen. In Google Cloud, signed in as yourself:</p>
+      <p className="text-zinc-600 dark:text-zinc-400">Google needs to know about your site once before it will show its sign-in screen. These links open your Google Cloud project named Maverick ({GOOGLE_PROJECT}), not Maverick Life OS:</p>
       <ol className="list-decimal space-y-2 pl-5">
         <li>
-          <a className="text-brand underline" href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noreferrer">
-            Create a project
-          </a>{" "}
-          named Maverick.
-        </li>
-        <li>
-          <a className="text-brand underline" href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" target="_blank" rel="noreferrer">
+          <a className="text-brand underline" href={cloud("apis/library/gmail.googleapis.com")} target="_blank" rel="noreferrer">
             Turn on the Gmail API
           </a>
           .
         </li>
         <li>
-          <a className="text-brand underline" href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noreferrer">
+          <a className="text-brand underline" href={cloud("auth/overview")} target="_blank" rel="noreferrer">
             Set up the sign-in screen
           </a>
           : app name Maverick, audience External, and under Audience add your Gmail address as a test user.
         </li>
         <li>
-          <a className="text-brand underline" href="https://console.cloud.google.com/auth/clients/create" target="_blank" rel="noreferrer">
+          <a className="text-brand underline" href={cloud("auth/clients/create")} target="_blank" rel="noreferrer">
             Create a client
           </a>
           : type Web application, and add this as the authorized redirect URI:
@@ -316,14 +314,15 @@ function Scan({ status, reload }: { status: Status; reload: () => Promise<void> 
         </button>
       </div>
       <p className="mt-2 text-xs text-zinc-500">
-        Searches email from {short(from)} to {short(to)}, up to 400 messages.
+        Searches email from {short(from)} to {short(to)}, reading up to 400 new messages per scan.
       </p>
       {error && <p className="mt-2 text-sm text-rose-600">{error}</p>}
       {last && (
         <p className="mt-2 text-sm" data-testid="gmail-last-scan">
           Last scan {short(last.from)} to {short(last.to)}: looked at {last.looked} emails, kept {last.kept} bills and receipts ({last.added} new
           {last.duplicates ? `, ${last.duplicates} repeats` : ""}).
-          {last.capped && " It stopped at 400 emails; pick a shorter range to see the rest."}
+          {last.movedOut ? ` Checked ${last.rechecked} earlier finds again with updated rules and moved ${last.movedOut} to Not bills.` : ""}
+          {last.capped && " There are more emails in this range: press Scan again to carry on where it stopped."}
         </p>
       )}
     </Card>
@@ -488,7 +487,7 @@ function ItemRow({
         <div>
           <dt className="text-zinc-500">Source</dt>
           <dd>
-            <a href={gmailLink(item.id, email)} target="_blank" rel="noreferrer" className="text-brand underline">
+            <a href={gmailLink(item, email)} target="_blank" rel="noreferrer" className="text-brand underline">
               Open in Gmail
             </a>
           </dd>

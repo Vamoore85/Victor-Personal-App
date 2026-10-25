@@ -49,6 +49,12 @@ export function suggestBill(item: EmailItem, scope: Scope, bills: Bill[]): Bill 
   return same.length === 1 ? same[0] : null;
 }
 
-/** A link that opens the message in Gmail, in the right account. */
-export const gmailLink = (id: string, email: string | null) =>
-  `https://mail.google.com/mail/${email ? `?authuser=${encodeURIComponent(email)}` : "u/0/"}#all/${encodeURIComponent(id)}`;
+/**
+ * A link that opens the message in Gmail, in the right account. Gmail's web
+ * address for a message isn't the API's id, so the link searches for the
+ * email's own Message-ID, which finds exactly that message.
+ */
+export function gmailLink(item: Pick<EmailItem, "id" | "messageId">, email: string | null) {
+  const base = `https://mail.google.com/mail/u/${email ? encodeURIComponent(email) : "0"}/`;
+  return item.messageId ? `${base}#search/${encodeURIComponent(`rfc822msgid:${item.messageId}`)}` : `${base}#all/${encodeURIComponent(item.id)}`;
+}

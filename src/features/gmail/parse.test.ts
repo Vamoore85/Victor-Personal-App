@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { amounts, extract, kindOf, mergeFound, messageText, pickAmount, readDate, sender, type EmailItem, type RawMessage } from "./parse";
-import { suggestBill, suggestScope } from "./match";
+import { amounts, extract, kindOf, mergeFound, messageText, pickAmount, readDate, RULES, sender, type EmailItem, type RawMessage } from "./parse";
+import { gmailLink, suggestBill, suggestScope } from "./match";
 import { applyReview, searchQuery } from "@/lib/gmail";
 import type { Bill, Institution } from "@/features/money/types";
 
@@ -136,4 +136,40 @@ test("suggests a company only when exactly one fits, and never assumes Personal"
   const bills = [bill("b1", "Example Power electric", "gladiator"), bill("b2", "Example Power", "personal")];
   assert.equal(suggestBill(item("a"), "gladiator", bills)?.id, "b1");
   assert.equal(suggestBill(item("a"), "business", bills), null);
+});
+
+const mail = (subject: string, body: string, extra: { name: string; value: string }[] = []): RawMessage => ({
+  id: "m1",
+  internalDate: String(Date.parse("2026-10-20T12:00:00Z")),
+  payload: {
+    mimeType: "text/plain",
+    headers: [{ name: "Subject", value: subject }, { name: "From", value: "Example <billing@example.com>" }, ...extra],
+    body: { data: Buffer.from(body).toString("base64url") },
+  },
+});
+
+test("pending authorizations and holds aren't bills", () => {
+  assert.equal(extract(mail("Pending authorization on your card", "A pending authorization of $1.00 was placed. Payment details follow."), "now"), null);
+  assert.equal(extract(mail("Your ride", "Temporary hold of $25.00 for your trip. Receipt to follow."), "now"), null);
+});
+
+test("service and account notices that mention payments aren't bills", () => {
+  assert.equal(extract(mail("Important changes to our terms of service", "Your payment of $9.99 will continue as usual. Invoice details in your account."), "now"), null);
+  assert.equal(extract(mail("Update your payment method", "Your card ending 1234 is expiring. Your bill of $15.00 may fail."), "now"), null);
+});
+
+test("a body-only mention with an unlabeled amount is dropped, a labeled one is kept", () => {
+  assert.equal(extract(mail("A message from Example", "We noticed your payment settings. Plans start at $5.00."), "now"), null);
+  const kept = extract(mail("A message from Example", "Your statement is ready.\nAmount due: $42.10\nDue date: Nov 5, 2026"), "now");
+  assert.equal(kept?.amount, 42.1);
+});
+
+test("the email's Message-ID is kept for the Open in Gmail link", () => {
+  const item = extract(mail("Your bill is ready", "Amount due: $30.00", [{ name: "Message-ID", value: "<abc.123@mail.example.com>" }]), "now");
+  assert.equal(item?.messageId, "abc.123@mail.example.com");
+  assert.equal(item?.rules, RULES);
+  assert.equal(
+    gmailLink(item!, "you@gmail.com"),
+    "https://mail.google.com/mail/u/you%40gmail.com/#search/rfc822msgid%3Aabc.123%40mail.example.com",
+  );
 });
