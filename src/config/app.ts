@@ -24,6 +24,7 @@ export const LIFE_AREAS: readonly LifeArea[] = [
   { slug: "accounts", short: "Accounts", group: "work", label: "Accounts", blurb: "Every account by company, with live balances", href: "/accounts" },
   { slug: "logins", short: "Logins", group: "work", label: "Logins", blurb: "Every login by company, locked in your Maverick Vault", href: "/logins" },
   { slug: "emailbills", short: "Email bills", group: "work", label: "Email bills", blurb: "Bills and receipts found in your Gmail, for you to review", href: "/email-bills" },
+  { slug: "gladiator365", short: "Gladiator 365", group: "work", label: "Gladiator 365", blurb: "Gladiator Outlook mail and Teams, sent only after your preview", href: "/gladiator" },
   { slug: "invest", short: "Invest", group: "work", label: "Invest", blurb: "Goals, plus the books and video clips that get you there", href: "/invest" },
   { slug: "projects", short: "Projects", group: "work", label: "Projects", blurb: "Brain Dump inbox, projects, tasks and someday", href: "/projects" },
   { slug: "ideas", short: "Ideas", group: "work", label: "Ideas", blurb: "A free-form place to dump ideas", href: "/ideas" },
@@ -34,6 +35,6 @@ export const LIFE_AREAS: readonly LifeArea[] = [
   { slug: "style", short: "Style", group: "life", label: "Fashion & Clothes", blurb: "Wardrobe, outfits, and wish list", href: "/style" },
   { slug: "travel", short: "Travel", group: "life", label: "Travel & Vacation", blurb: "Trips, vacations, and places to go", href: "/travel" },
 
-  { slug: "calendar", short: "Calendar", group: "life", label: "Calendar", blurb: "Schedule, events, and reminders" },
+  { slug: "calendar", short: "Calendar", group: "life", label: "Calendar", blurb: "Google, Gladiator Outlook and bill due dates in one place", href: "/calendar" },
   { slug: "people", short: "People", group: "life", label: "People", blurb: "Family, friends, and contacts" },
 ];

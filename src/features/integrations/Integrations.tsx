@@ -13,6 +13,8 @@ type Status = {
   banks?: { connections: number; institutions: string[]; problems: number; lastSync: string | null; accounts: { name: string; last4: string; company: string }[] };
   gmail?: { keys: boolean; connected: boolean; connectedAt: string | null; lastScan: string | null; review: number } | null;
   quickbooks?: { connected: boolean; companyName: string | null; connectedAt: string | null } | null;
+  googleCalendar?: { connected: boolean; email: string | null; lastRead: string | null } | null;
+  microsoft?: { account: string; keys: boolean; connected: boolean; email: string | null; connectedAt: string | null; teams: boolean; lastCalendarRead: string | null } | null;
 };
 
 function ago(iso: string | null | undefined) {
@@ -97,6 +99,8 @@ export function IntegrationsScreen() {
   const banks = s?.banks;
   const qb = s?.quickbooks;
   const gm = s?.gmail;
+  const gc = s?.googleCalendar;
+  const ms = s?.microsoft;
   const ring = c.apps.ring?.allowed ?? {};
 
   return (
@@ -170,22 +174,35 @@ export function IntegrationsScreen() {
             }
           />
           <IntegrationCard
-            testId="int-outlook-mail"
-            name="Outlook email (Microsoft 365)"
-            state="Planned"
-            tone="planned"
-            purpose="Find follow-ups and send project-related emails to your Brain Dump, kept separate by Personal, Maverick and Gladiator."
-            permissions="Read-only, only the mailboxes you pick. Maverick will never send, delete or move email without asking you first."
-            action={<span className={btnOff}>Connect (coming next)</span>}
+            testId="int-google-cal"
+            name="Google Calendar"
+            state={gc?.connected ? "Connected" : "Built, not connected"}
+            tone={gc?.connected ? "on" : "off"}
+            purpose={gc?.connected ? `${gc.email ?? "Your Google account"}, last read ${ago(gc.lastRead)}. Shown on the Calendar labeled Google.` : "Your Gmail account's calendars on the Calendar page, labeled Google."}
+            permissions="Read-only. Disconnecting it doesn't touch the Gmail bill scans."
+            action={<Link href="/calendar" className={btn}>{gc?.connected ? "Open" : "Set up"}</Link>}
           />
           <IntegrationCard
-            testId="int-outlook-cal"
-            name="Outlook calendar (Microsoft 365)"
-            state="Planned"
-            tone="planned"
-            purpose="Your daily agenda and upcoming meetings, with optional reminders."
-            permissions="Read-only, only the calendars you pick. No events created or changed without your OK."
-            action={<span className={btnOff}>Connect (coming next)</span>}
+            testId="int-outlook-mail"
+            name="Gladiator Outlook mail and calendar"
+            state={ms?.connected ? "Connected" : "Built, not connected"}
+            tone={ms?.connected ? "on" : "off"}
+            purpose={
+              ms?.connected
+                ? `${ms.email}, connected ${ago(ms.connectedAt)}. Calendar last read ${ago(ms.lastCalendarRead)}.`
+                : `Read, search, reply and send from ${ms?.account ?? "vic@gladiatoremergence.com"}, and add or change Gladiator meetings.`
+            }
+            permissions="Only that one mailbox. Every email, draft or event change shows you a preview first and happens only when you confirm. Nothing is deleted."
+            action={<Link href="/gladiator" className={btn}>{ms?.connected ? "Open" : "Set up"}</Link>}
+          />
+          <IntegrationCard
+            testId="int-teams"
+            name="Microsoft Teams (Gladiator)"
+            state={ms?.teams ? "Connected" : "Built, not connected"}
+            tone={ms?.teams ? "on" : "off"}
+            purpose="Your Gladiator chats and channel conversations with replies, linked back to Teams. Teams meetings show once, from Outlook."
+            permissions="Only chats and channels you're already in. Replies post only after your preview. Reading channels needs a one-time admin OK."
+            action={<Link href="/gladiator" className={btn}>{ms?.teams ? "Open" : "Set up"}</Link>}
           />
         </div>
       </section>
