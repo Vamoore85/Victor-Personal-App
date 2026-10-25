@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { detectRecurring } from "./bill-intel";
+import { detectRecurring, groupKey, isCandidate } from "./bill-intel";
 import { EMPTY_DATA, type Account, type MoneyData, type Transaction } from "./types";
 
 /*
@@ -105,4 +105,35 @@ test("the big monthly check from the personal account is rent, the smaller ones 
 test("a check with CHK in the middle of the bank's wording still counts", () => {
   const d = data(months(1, 8, 4).map((day, i) => t("2222", day, 640, `PAID CHK ${500 + i}`, "Owner draw")));
   assert.ok(find(d, /^Check 640$/));
+});
+
+test("transfers to checking accounts are not written checks, with or without a saved transfer link", () => {
+  for (const description of ["WEB XFER TO CHK 00000000001234", "WEB XFER FROM CHK 00000000001234", "TRANSFER TO CHK 1234"]) {
+    for (const transferId of [undefined, "own-account-move"]) {
+      const payment = t("1111", "2026-10-20", 16000, description, "Other", { transferId });
+      assert.equal(isCandidate(payment, "out"), false, description);
+      assert.doesNotMatch(groupKey(payment), /^CHECK /);
+    }
+  }
+});
+
+test("checking-account transfers cannot spoil rent or child support detection", () => {
+  const d = data([
+    t("1111", "2026-09-02", 1900, "CHECK 0201"),
+    t("1111", "2026-10-04", 1900, "CHECK 0203"),
+    t("1111", "2026-09-15", 750, "CHECK 0202"),
+    t("1111", "2026-10-20", 16000, "WEB XFER TO CHK 00000000001234"),
+    t("1111", "2026-10-20", 900, "WEB XFER TO CHK 00000000005678"),
+    t("1111", "2026-10-02", 40, "WEB XFER TO CHK 00000000005678"),
+  ]);
+  const rent = find(d, /^Rent$/);
+  assert.ok(rent);
+  assert.equal(rent.typical, 1900);
+  assert.equal(rent.cadence, "monthly");
+  assert.equal(rent.nextExpected, "2026-11-03");
+  assert.equal(rent.occurrences.length, 2);
+  const support = find(d, /^Child support$/);
+  assert.ok(support);
+  assert.equal(support.typical, 750);
+  assert.equal(support.occurrences.length, 1);
 });
