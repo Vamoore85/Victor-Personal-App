@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EMPTY_DATA, type Bill, type RecurringFinding } from "@/features/money/types";
-import { upcoming } from "@/features/money/outlook";
+import { upcoming, recurringRows } from "@/features/money/outlook";
 import { billDatesBetween } from "@/features/money/calc";
 import { applyRecurringEmails, explicitCadence, recurringEmailBills } from "./recurring";
 import { extract, type EmailItem } from "./parse";
@@ -11,15 +11,23 @@ const item = (id: string, dueDate = "2026-11-01", change: Partial<EmailItem> = {
 const monthly = () => [item("a","2026-09-01"),item("b","2026-10-01"),item("c")];
 
 test("bank and email evidence feed one expected calendar entry and preserve dismissed or edited findings",()=> {
-  const finding: RecurringFinding={id:"bank-pattern",key:"out:example:personal",direction:"out",merchant:"Example Utility",scope:"personal",cadence:"monthly",typical:49,min:49,max:49,firstDate:"2026-08-01",lastDate:"2026-10-01",usualDay:1,nextExpected:"2026-11-01",confidence:"high",reasons:[],occurrences:[],accountIds:[],category:"Utilities",status:"detected",updatedAt:now};
+  const finding: RecurringFinding={id:"bank-pattern",key:"out:example:personal",direction:"out",merchant:"Example Utility",scope:"personal",cadence:"monthly",typical:49,min:49,max:49,firstDate:"2026-08-01",lastDate:"2026-10-01",usualDay:1,nextExpected:"2026-11-01",confidence:"high",reasons:[],occurrences:[{txnId:"bank-source",date:"2026-10-01",amount:49,accountId:"bank",source:"bank"}],accountIds:[],category:"Utilities",status:"detected",updatedAt:now};
   const data={...EMPTY_DATA,recurring:[finding]};
   const result=applyRecurringEmails(data,monthly(),now);
   assert.equal(result.added,1);
   assert.equal(result.data.bills[0].recurringId,finding.id);
   assert.equal(upcoming(result.data,30,now).length,1);
-  assert.equal(result.data.recurring[0].overrides?.amount,50);
+  assert.equal(result.data.recurring[0].typical,49);
+  assert.equal(result.data.recurring[0].overrides,undefined);
+  assert.equal(recurringRows(result.data)[0].nextAmount,50);
+  const advanced={...result.data,bills:result.data.bills.map(b=>({...b,nextDue:"2026-12-01"}))};
+  assert.equal(recurringRows(advanced)[0].nextDate,"2026-12-01");
   assert.equal(applyRecurringEmails({...data,recurring:[{...finding,status:"dismissed"}]},monthly(),now).added,0);
   assert.equal(applyRecurringEmails({...data,recurring:[{...finding,overrides:{amount:47}}]},monthly(),now).added,0);
+  const owned={...data,accounts:[{id:"bank",name:"Checking",type:"checking" as const,openingBalance:0,scope:"gladiator" as const}],recurring:[{...finding,scope:"gladiator" as const,accountIds:["bank"]}]};
+  const unassigned=monthly().map(i=>({...i,scope:undefined}));
+  assert.equal(applyRecurringEmails(owned,unassigned,now).data.bills[0]?.scope,"gladiator");
+  assert.equal(applyRecurringEmails({...owned,accounts:owned.accounts.map(a=>({...a,needsEntity:true}))},unassigned,now).added,0);
 });
 
 test("regular bill dates route one current bill and its expected calendar, without inventing payments", () => {

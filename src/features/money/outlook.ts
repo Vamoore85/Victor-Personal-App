@@ -226,11 +226,13 @@ export type RecurringRow = {
  */
 export function recurringRows(d: MoneyData): RecurringRow[] {
   const acct = new Map(d.accounts.map((a) => [a.id, accountLabel(a)]));
+  const bills = new Map(d.bills.map(b => [b.id,b]));
   const assigned = new Set(d.accounts.filter(counts).map((a) => a.id));
   return d.recurring
     .filter((f) => f.direction === "out" && f.status !== "dismissed" && f.occurrences.length > 0 && (!f.accountIds.length || f.accountIds.some((id) => assigned.has(id))))
     .map((f) => {
       const e = effective(f);
+      const bill = f.billId ? bills.get(f.billId) : undefined;
       const last = [...f.occurrences].sort((a, b) => b.date.localeCompare(a.date))[0];
       const bankSeen = f.occurrences.filter((o) => o.source === "bank").length;
       const steady = f.max - f.min <= Math.max(1, f.typical * 0.1);
@@ -238,14 +240,14 @@ export function recurringRows(d: MoneyData): RecurringRow[] {
         f.status === "confirmed" ? "confirmed" : f.status === "review" || f.confidence === "low" || f.cadence === "irregular" || !bankSeen || !steady ? "review" : "autopay";
       return {
         finding: f,
-        name: e.name,
-        entity: e.scope,
+        name: bill?.name ?? e.name,
+        entity: bill?.scope ?? e.scope,
         accounts: [...new Set(f.accountIds.map((id) => acct.get(id) ?? "Removed account"))],
-        cadence: e.cadence,
+        cadence: bill ? bill.frequency === "once" ? "irregular" : bill.frequency : e.cadence,
         lastDate: last.date,
         lastAmount: last.amount,
-        nextDate: e.nextDate,
-        nextAmount: e.amount,
+        nextDate: bill?.nextDue ?? e.nextDate,
+        nextAmount: bill?.amount ?? e.amount,
         confidence: f.status === "confirmed" ? "confirmed" : f.confidence,
         status,
         seen: f.occurrences.length,

@@ -160,7 +160,7 @@ function AutomaticMail({reload}: {reload:()=>Promise<void>}) {
     <p className="mt-2 text-sm text-zinc-500">{state?.schedule ?? "Scheduled checks"} · Recent bills and receipts · Runs with this page closed</p>
     {state?.lastCheck && <p className="mt-1 text-sm">Last check: {new Date(state.lastCheck).toLocaleString()}{state.looked !== undefined ? ` · ${state.looked} emails examined` : ""}</p>}
     {state?.lastNote && <p className="mt-1 text-sm text-zinc-500">{state.lastNote}</p>}
-    {(error || state?.lastError) && <p role="status" className="mt-2 text-sm text-amber-700">{error || state?.lastError}</p>}
+    {(error || state?.lastError) && <p role="status" className="mt-2 text-sm text-amber-700">{error || state?.lastError} {error && <button className="underline" onClick={()=> {setError("");void call<{automatic:AutoState}>("automatic").then(r=>setState(r.automatic)).catch(e=>setError(e.message));}}>Retry settings</button>}</p>}
   </section>;
 }
 
