@@ -40,3 +40,18 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@media print {
+  :root { --background: white; --surface: white; --foreground: black; }
+  body { background: white; color: black; }
+  body:has(.report-page) aside,
+  body:has(.report-page) nav,
+  body:has(.report-page) main ~ *,
+  body:has(.report-page) .report-controls,
+  body:has(.report-page) header.sticky { display: none !important; }
+  body:has(.report-page) > div { padding-left: 0 !important; }
+  body:has(.report-page) main { max-width: none; padding: 0; }
+  .report-page { max-width: none; }
+  .report-page section { break-inside: avoid; }
+  .report-page details > * { display: block !important; }
+}

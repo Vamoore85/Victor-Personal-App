@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ScopeContext, filterByScope, type ScopeView } from "./scope";
 import { cloudErrorMessage, importMoneyData, retryCloud, useCloudState, useMoneyData } from "./store";
@@ -51,6 +52,7 @@ const DETAILS: { id: string; label: string; scoped?: boolean }[] = [
 ];
 
 export function FinancialCenter() {
+  const searchParams = useSearchParams();
   const data = useMoneyData();
   const cloud = useCloudState();
   const [chosenTab, setTab] = useState<string | null>(() => {
@@ -77,7 +79,8 @@ export function FinancialCenter() {
   if (!data) {
     return <p className="text-sm text-zinc-500">Loading…</p>;
   }
-  const tab = chosenTab ?? "overview";
+  const requested = searchParams.get("tab");
+  const tab = chosenTab ?? (requested && [...MAIN, ...DETAILS].some((t) => t.id === requested) ? requested : "overview");
 
   const personalCategories = categoriesInUse(filterByScope(data, "personal"), DEFAULT_CATEGORIES);
   const categories =
@@ -130,14 +133,14 @@ export function FinancialCenter() {
     <ScopeContext.Provider value={scoped}>
     <div className="flex flex-col gap-5 lg:gap-6">
       <VaultAutoLock />
-      <nav className="flex items-center justify-between gap-2" aria-label="Money">
+      <nav className="flex flex-wrap items-center justify-between gap-3" aria-label="Money">
         <div className="flex min-w-0 gap-0.5 overflow-x-auto rounded-full bg-zinc-200/60 p-1 [scrollbar-width:none] sm:gap-1 dark:bg-zinc-900">
           {MAIN.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
               aria-current={tab === t.id ? "page" : undefined}
-              className={`shrink-0 rounded-full px-2.5 py-1.5 text-[13px] sm:px-4 sm:text-sm ${
+              className={`min-h-11 shrink-0 rounded-full px-3 py-2 text-sm sm:px-4 sm:text-base ${
                 tab === t.id
                   ? "bg-white font-medium text-brand shadow-sm dark:bg-zinc-800"
                   : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
@@ -148,13 +151,14 @@ export function FinancialCenter() {
           ))}
         </div>
         <details className="relative shrink-0" data-testid="details-menu">
-          <summary aria-label="Details" className={`${ghostButtonClass} list-none whitespace-nowrap ${detailTab ? "text-brand" : ""}`}>
-            <span className="hidden sm:inline">{detailTab ? detailTab.label : "Details"} ▾</span>
+          <summary aria-label="More tools" className={`${ghostButtonClass} list-none whitespace-nowrap ${detailTab ? "text-brand" : ""}`}>
+            <span className="hidden sm:inline">{detailTab ? detailTab.label : "Tools"} ▾</span>
             <span className="sm:hidden" aria-hidden>
               •••
             </span>
           </summary>
           <div className="absolute right-0 z-20 mt-1 flex w-56 flex-col gap-0.5 rounded-xl border border-zinc-200 bg-surface p-1 shadow-lg dark:border-zinc-800">
+            <Link href="/reports" className="rounded-lg px-3 py-3 text-left text-sm font-medium text-brand">Reports &amp; downloads</Link>
             {DETAILS.map((t) => (
               <button
                 key={t.id}

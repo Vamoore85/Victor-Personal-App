@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { FinancialCenter } from "@/features/money/FinancialCenter";
 
@@ -8,10 +9,10 @@ export default function MoneyPage() {
   return (
     <div>
       <PageHeader
-        title="Financial Center"
-        subtitle="Personal money, Maverick and Gladiator's books, bills, budgets and Maverick Vault in one place."
+        title="Money"
+        subtitle="Your balances, upcoming bills, and recent activity."
       />
-      <FinancialCenter />
+      <Suspense fallback={<p>Loading your money…</p>}><FinancialCenter /></Suspense>
     </div>
   );
 }

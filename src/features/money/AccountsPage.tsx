@@ -15,7 +15,7 @@ import type { Scope } from "./types";
 
 // Same company colors as the Bills page.
 const HEAD: Record<Scope, string> = { business: "bg-blue-600", personal: "bg-green-600", gladiator: "bg-orange-500" };
-const ORDER: Scope[] = ["business", "personal", "gladiator"];
+const ORDER: Scope[] = ["personal", "business", "gladiator"];
 
 const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 function ago(iso: string | null) {
@@ -40,18 +40,18 @@ function Rows({ lines, owed }: { lines: AccountLine[]; owed?: boolean }) {
         <tr key={`${a.last4}-${i}`} className="border-t border-zinc-100 dark:border-zinc-800">
           <td className="py-2 pr-3">
             <div className="font-medium">{a.name}</div>
-            <div className="text-xs text-zinc-500">
+            <div className="text-sm text-zinc-500">
               {a.last4 ? `··${a.last4}` : ""}
               {a.bankName ? ` · ${a.bankName}` : ""}
             </div>
           </td>
-          <td className={`py-2 pr-3 text-xs ${STATE[a.state].tone}`}>
+          <td className={`py-2 pr-3 text-sm ${STATE[a.state].tone}`}>
             {STATE[a.state].label}
             {a.asOf && <div className="text-zinc-400">{ago(a.asOf)}</div>}
           </td>
           <td className="py-2 text-right font-semibold tabular-nums">
             {a.amount === null ? <span className="text-zinc-400">—</span> : money(a.amount)}
-            {owed && a.credit != null && <div className="text-xs font-normal text-zinc-500">{money(a.credit)} left</div>}
+            {owed && a.credit != null && <div className="text-sm font-normal text-zinc-500">{money(a.credit)} left</div>}
           </td>
         </tr>
       ))}
@@ -75,16 +75,16 @@ export function AccountsOverview() {
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-2 gap-3 sm:max-w-md">
         <div className="rounded-2xl border border-zinc-200 bg-surface p-4 dark:border-zinc-800">
-          <div className="text-xs text-zinc-500">Cash, all companies</div>
+          <div className="text-sm text-zinc-500">Cash, all companies</div>
           <div className="text-2xl font-semibold tabular-nums">{money(totalCash)}</div>
         </div>
         <div className="rounded-2xl border border-zinc-200 bg-surface p-4 dark:border-zinc-800">
-          <div className="text-xs text-zinc-500">Owed on cards and loans</div>
+          <div className="text-sm text-zinc-500">Owed on cards and loans</div>
           <div className="text-2xl font-semibold tabular-nums">{money(totalOwed)}</div>
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-5">
         {ORDER.map((id) => {
           const e = ents.find((x) => x.entity === id)!;
           const label = ENTITIES.find((x) => x.id === id)!.label;
@@ -97,9 +97,9 @@ export function AccountsOverview() {
               <div className="px-4 pb-3">
                 {e.accounts.length + e.cards.length === 0 && <p className="py-3 text-sm text-zinc-500">No accounts yet.</p>}
                 {e.accounts.length > 0 && (
-                  <table className="w-full text-sm">
+                  <table className="w-full text-base">
                     <thead>
-                      <tr className="text-left text-xs text-zinc-500">
+                      <tr className="text-left text-sm text-zinc-500">
                         <th className="pt-3 pb-1 font-medium">Bank accounts</th>
                         <th className="pt-3 pb-1 font-medium">Balance from</th>
                         <th className="pt-3 pb-1 text-right font-medium">Available</th>
@@ -111,9 +111,9 @@ export function AccountsOverview() {
                   </table>
                 )}
                 {e.cards.length > 0 && (
-                  <table className="mt-2 w-full text-sm">
+                  <table className="mt-2 w-full text-base">
                     <thead>
-                      <tr className="text-left text-xs text-zinc-500">
+                      <tr className="text-left text-sm text-zinc-500">
                         <th className="pt-3 pb-1 font-medium">Cards and loans</th>
                         <th className="pt-3 pb-1 font-medium">Balance from</th>
                         <th className="pt-3 pb-1 text-right font-medium">Owed</th>
@@ -125,7 +125,7 @@ export function AccountsOverview() {
                   </table>
                 )}
                 {e.stale > 0 && (
-                  <p className="mt-2 text-xs text-zinc-500">
+                  <p className="mt-2 text-sm text-zinc-500">
                     {e.stale} account{e.stale === 1 ? " has" : "s have"} no live balance and {e.stale === 1 ? "isn't" : "aren't"} in the cash total.
                   </p>
                 )}

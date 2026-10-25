@@ -21,9 +21,11 @@ import { FreshBuild } from "./FreshBuild";
 const BARE = ["/login", "/security", "/trust"];
 
 /** Phone tab bar: the screens used most. Everything else is under More. */
-const TABS = ["money", "invest", "health"];
+const TABS = ["money", "accounts", "reports"];
 
-const live = LIFE_AREAS.filter((a) => a.href);
+const live = [...LIFE_AREAS.filter((a) => a.href).map((a) => a.slug === "money" ? { ...a, label: "Money" } : a),
+  { slug: "reports", short: "Reports", group: "work", label: "Reports", blurb: "Financial reports", href: "/reports" },
+];
 
 function isActive(pathname: string, href: string) {
   return href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(href + "/");
@@ -48,7 +50,7 @@ function NavItem({ href, icon, label, active, onNavigate }: { href: string; icon
       href={href}
       onClick={onNavigate}
       aria-current={active ? "page" : undefined}
-      className={`flex h-9 items-center gap-3 rounded-lg px-2.5 text-sm ${
+      className={`flex min-h-11 items-center gap-3 rounded-lg px-3 text-base ${
         active
           ? "bg-brand/10 font-medium text-brand"
           : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800/70"
@@ -62,37 +64,33 @@ function NavItem({ href, icon, label, active, onNavigate }: { href: string; icon
 
 /** The full list of places to go, shared by the desktop sidebar and the phone/tablet menu. */
 function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
-  const soon = LIFE_AREAS.filter((a) => !a.href);
+  const primary = TABS.map((slug) => live.find((a) => a.slug === slug)!);
+  const other = live.filter((a) => !TABS.includes(a.slug));
   return (
     <nav aria-label="Main" className="flex flex-col gap-4">
       <NavItem href="/" icon="home" label="Home" active={isActive(pathname, "/")} onNavigate={onNavigate} />
-      {AREA_GROUPS.map((g) => (
-        <div key={g.id} className="flex flex-col gap-0.5">
-          <p className="px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wide text-zinc-400">{g.label}</p>
-          {live
-            .filter((a) => a.group === g.id)
-            .map((a) => (
-              <NavItem key={a.slug} href={a.href!} icon={a.slug} label={a.label} active={isActive(pathname, a.href!)} onNavigate={onNavigate} />
-            ))}
-        </div>
-      ))}
-      <div className="flex flex-col gap-0.5">
-        <p className="px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wide text-zinc-400">Coming soon</p>
-        {soon.map((a) => (
-          <div key={a.slug} className="flex h-9 items-center gap-3 px-2.5 text-sm text-zinc-400 dark:text-zinc-600">
-            <Icon name={a.slug} className="shrink-0" />
-            <span className="truncate">{a.label}</span>
+      <div className="flex flex-col gap-1">
+        {primary.map((a) => <NavItem key={a.slug} href={a.href!} icon={a.slug} label={a.label} active={isActive(pathname, a.href!)} onNavigate={onNavigate} />)}
+      </div>
+      <details key={pathname} open={other.some((a) => isActive(pathname, a.href!))}>
+        <summary className="cursor-pointer rounded-lg px-2.5 py-3 text-sm font-medium text-zinc-600 dark:text-zinc-300">More areas</summary>
+        {AREA_GROUPS.map((g) => (
+          <div key={g.id} className="mt-3 flex flex-col gap-1">
+            <p className="px-2.5 text-xs font-medium text-zinc-500">{g.label}</p>
+            {other.filter((a) => a.group === g.id).map((a) => <NavItem key={a.slug} href={a.href!} icon={a.slug} label={a.label} active={isActive(pathname, a.href!)} onNavigate={onNavigate} />)}
           </div>
         ))}
-      </div>
+      </details>
     </nav>
   );
 }
 
 function AccountLinks({ onNavigate }: { onNavigate?: () => void }) {
-  const row = "flex h-9 items-center gap-3 rounded-lg px-2.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800/70";
+  const row = "flex min-h-11 items-center gap-3 rounded-lg px-3 text-base text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800/70";
   return (
-    <div className="flex flex-col gap-0.5 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+    <details className="border-t border-zinc-200 pt-3 dark:border-zinc-800">
+      <summary className="cursor-pointer px-3 py-3 text-sm text-zinc-600 dark:text-zinc-300">Settings</summary>
+      <div className="flex flex-col gap-1">
       <Link href="/integrations" onClick={onNavigate} className={row}>
         <Icon name="plug" /> Integrations
       </Link>
@@ -105,7 +103,8 @@ function AccountLinks({ onNavigate }: { onNavigate?: () => void }) {
       <SignOut className={`${row} w-full text-left`}>
         <Icon name="logout" /> Sign out
       </SignOut>
-    </div>
+      </div>
+    </details>
   );
 }
 
@@ -128,7 +127,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const current = live.find((a) => isActive(pathname, a.href!));
   const close = () => setMenuOpen(false);
-  const tabs = live.filter((a) => TABS.includes(a.slug));
+  const tabs = TABS.map((slug) => live.find((a) => a.slug === slug)!);
   const moreActive = !isActive(pathname, "/") && !tabs.some((a) => isActive(pathname, a.href!));
 
   return (

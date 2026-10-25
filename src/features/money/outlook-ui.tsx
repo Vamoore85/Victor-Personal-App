@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { applyScan, detectRecurring, SCAN_RULES } from "./bill-intel";
 import { addDays, money, today } from "./calc";
@@ -52,22 +53,29 @@ const dayLabel = (ymd: string) => {
 
 export function Overview({ data, onSettings }: { data: MoneyData; onSettings: () => void }) {
   const [query, setQuery] = useState("");
+  const [entity, setEntity] = useState<Scope>("personal");
   const activity = useSyncActivity();
   useBillScan(data);
 
-  // Fixed order, left to right: Maverick | Personal | Gladiator.
-  const ORDER = ["business", "personal", "gladiator"];
+  // Personal first; one area at a time keeps names and amounts readable.
+  const ORDER = ["personal", "business", "gladiator"];
   const bal = balances(data).sort((a, b) => ORDER.indexOf(a.entity) - ORDER.indexOf(b.entity));
   const lines = upcoming(data, 30);
   const f = freshness(data);
-  const combined = bal.reduce((s, b) => s + b.available, 0);
-  const anyBalance = bal.some((b) => b.counted > 0);
   const txns = transactionRows(data, query);
   const hasBankTxns = data.transactions.some((t) => t.plaidId);
   const unassignedAccts = data.accounts.filter((a) => a.needsEntity && !(a.plaid && data.bankLinks.find((l) => l.id === a.plaid!.linkId)?.duplicateOf));
 
   return (
     <div className="flex flex-col gap-5 lg:gap-6" data-testid="outlook">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <label className="flex flex-col gap-2 text-sm font-medium">Showing
+          <select value={entity} onChange={(e) => setEntity(e.target.value as Scope)} className="min-h-11 min-w-52 rounded-xl border border-zinc-300 bg-surface px-4 text-base dark:border-zinc-700">
+            {ENTITIES.map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
+          </select>
+        </label>
+        <Link href="/reports" className="rounded-xl bg-brand px-5 py-3 text-sm font-medium text-on-brand">Open reports</Link>
+      </div>
       {/* Header */}
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
@@ -80,11 +88,7 @@ export function Overview({ data, onSettings }: { data: MoneyData; onSettings: ()
                 : f.lastSync
                   ? `Banks synced ${ago(f.lastSync)}${f.freshness === "current" ? "" : f.freshness === "partial" ? " · older history still loading" : f.freshness === "failed" ? " · last sync failed" : " · not current"}`
                   : "Waiting for the first bank sync"}
-            {anyBalance && (
-              <>
-                {" · "}All three <span className="font-semibold text-zinc-900 tabular-nums dark:text-zinc-100" data-testid="combined">{money(combined)}</span>
-              </>
-            )}
+
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -122,9 +126,9 @@ export function Overview({ data, onSettings }: { data: MoneyData; onSettings: ()
 
       {unassignedAccts.length > 0 && <AssignTray accounts={unassignedAccts} />}
 
-      {/* Three permanent panels, the same order inside each: balance, upcoming bills, transactions */}
-      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3 lg:gap-5">
-        {bal.map((b) => (
+      {/* One selected area: balance, upcoming bills, then recent transactions. */}
+      <div className="grid grid-cols-1 items-start gap-4">
+        {bal.filter((b) => b.entity === entity).map((b) => (
           <EntityPanel
             key={b.entity}
             b={b}
@@ -216,10 +220,10 @@ function AccountRow({ a, card, onConnect }: { a: AccountLine; card?: boolean; on
           ) : (
             <span className="text-zinc-700 dark:text-zinc-200">{card ? `${money(a.amount)} owed` : money(a.amount)}</span>
           )}
-          {card && a.credit != null && <span className="text-[11px] text-zinc-400">{money(a.credit)} credit left</span>}
+          {card && a.credit != null && <span className="text-sm text-zinc-400">{money(a.credit)} credit left</span>}
         </span>
       </span>
-      {why && <span className="text-[11px] text-amber-700 dark:text-amber-400" data-testid="acct-why">{why}</span>}
+      {why && <span className="text-sm text-amber-700 dark:text-amber-400" data-testid="acct-why">{why}</span>}
     </li>
   );
 }
@@ -239,7 +243,8 @@ function EntityPanel({
   hasBankTxns: boolean;
   linked: boolean;
 }) {
-  const [shown, setShown] = useState(8);
+  const [shown, setShown] = useState(5);
+  const [allBills, setAllBills] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const due7 = total(lines, undefined, 7);
   const due30 = total(lines, undefined, 30);
@@ -252,7 +257,6 @@ function EntityPanel({
   const all = [...b.accounts, ...b.cards];
   const missing = all.filter((a) => a.state === "lost" || a.state === "unlinked");
   const needsConnection = b.counted === 0 && missing.length > 0;
-  const lost = all.some((a) => a.state === "lost");
   // Load Plaid's window code ahead of time so the button opens it quickly.
   useEffect(() => {
     if (needsConnection) loadPlaidScript().catch(() => {});
@@ -343,7 +347,7 @@ function EntityPanel({
             )}
           </ul>
         )}
-        <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-zinc-100 pt-3 text-xs dark:border-zinc-800">
+        <dl className="mt-3 grid grid-cols-1 gap-4 border-t border-zinc-100 pt-4 text-base sm:grid-cols-3 dark:border-zinc-800">
           <div>
             <dt className="text-zinc-500">Due 7 days</dt>
             <dd className="font-medium tabular-nums">{in7 ? money(due7) : <span className="font-normal text-zinc-500">None found</span>}</dd>
@@ -361,23 +365,24 @@ function EntityPanel({
 
       {/* Upcoming automatic bills */}
       <div className="border-t border-zinc-100 dark:border-zinc-800">
-        <h4 className="px-4 pt-3 text-[11px] font-medium uppercase tracking-wider text-zinc-500 sm:px-5">Upcoming bills</h4>
+        <h4 className="px-4 pt-3 text-sm font-medium uppercase tracking-wider text-zinc-500 sm:px-5">Upcoming bills</h4>
         {lines.length === 0 ? (
           <p className="px-4 pb-4 pt-1 text-xs text-zinc-500 sm:px-5">
             {hasBankTxns ? "None expected in the next 30 days." : linked ? "Appear once bank transactions have synced." : "Connect a bank under Accounts."}
           </p>
         ) : (
           <ul className="divide-y divide-zinc-100 pb-1 dark:divide-zinc-800/70" data-testid={`up-${b.entity}`}>
-            {lines.map((l) => (
+            {(allBills ? lines : lines.slice(0, 5)).map((l) => (
               <UpcomingRow key={l.key} l={l} />
             ))}
           </ul>
         )}
       </div>
 
+      {lines.length > 5 && <button className="px-5 py-3 text-left text-sm font-medium text-brand" onClick={() => setAllBills(!allBills)}>{allBills ? "Show fewer bills" : `View all ${lines.length} upcoming bills`}</button>}
       {/* Recent transactions */}
       <div className="border-t border-zinc-100 dark:border-zinc-800">
-        <h4 className="px-4 pt-3 text-[11px] font-medium uppercase tracking-wider text-zinc-500 sm:px-5">{query ? "Matching transactions" : "Recent transactions"}</h4>
+        <h4 className="px-4 pt-3 text-sm font-medium uppercase tracking-wider text-zinc-500 sm:px-5">{query ? "Matching transactions" : "Recent transactions"}</h4>
         {txns.length === 0 ? (
           <p className="px-4 pb-4 pt-1 text-xs text-zinc-500 sm:px-5">{query ? "Nothing matches." : "None yet."}</p>
         ) : (
@@ -389,8 +394,8 @@ function EntityPanel({
                   <button className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-zinc-50 sm:px-5 dark:hover:bg-zinc-900/60" onClick={() => setOpen(isOpen ? null : r.t.id)} aria-expanded={isOpen}>
                     <span className="w-12 shrink-0 text-xs text-zinc-500 tabular-nums">{new Date(`${r.t.date}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm">{r.t.description}</span>
-                      <span className="block truncate text-xs text-zinc-500">{r.account}</span>
+                      <span className="block break-words text-base">{r.t.description}</span>
+                      <span className="block break-words text-sm text-zinc-500">{r.account}</span>
                     </span>
                     <span className={`shrink-0 text-sm tabular-nums ${r.signed > 0 ? "text-emerald-700 dark:text-emerald-400" : ""}`}>
                       {r.signed > 0 ? "+" : "−"}
@@ -425,15 +430,15 @@ function UpcomingRow({ l }: { l: UpcomingLine }) {
     <li className="flex items-center gap-3 px-4 py-2.5 sm:px-5">
       <span className="w-12 shrink-0 text-xs leading-tight text-zinc-500">{dayLabel(l.date)}</span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm">{l.name}</span>
-        <span className="block truncate text-xs text-zinc-500">
+        <span className="block break-words text-base">{l.name}</span>
+        <span className="block break-words text-sm text-zinc-500">
           {cadenceWord(l.cadence)}
           {l.account && ` · ${l.account}`}
         </span>
       </span>
       <span className="flex shrink-0 flex-col items-end">
         <span className="text-sm tabular-nums">{money(l.amount)}</span>
-        <span className={`text-[11px] ${TONE[l.confidence]}`}>{l.predicted ? `Predicted · ${CONFIDENCE_LABEL[l.confidence]}` : "Confirmed"}</span>
+        <span className={`text-sm ${TONE[l.confidence]}`}>{l.predicted ? `Predicted · ${CONFIDENCE_LABEL[l.confidence]}` : "Confirmed"}</span>
       </span>
     </li>
   );
