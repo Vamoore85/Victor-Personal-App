@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { dbConfigured, readDoc, writeDoc } from "@/lib/db";
+import { dbConfigured, readDoc, writeDoc, getFile, putFile } from "@/lib/db";
 import { extract, mergeFound, type EmailItem, type EmailStatus, type RawMessage } from "@/features/gmail/parse";
 import type { Scope } from "@/features/money/types";
 
@@ -198,6 +198,26 @@ export async function readItems(): Promise<EmailDoc> {
   if (!dbConfigured()) return { items: [], lastScan: null };
   const d = (await readDoc(ITEMS_DOC))?.data as Partial<EmailDoc> | null;
   return { items: Array.isArray(d?.items) ? d.items : [], lastScan: d?.lastScan ?? null };
+}
+
+/** An original receipt email, including its MIME attachments, encrypted in the private file store.
+ * Only explicitly reviewed receipts can be archived. No Gmail message is changed. */
+export async function receiptOriginal(id: string): Promise<Buffer> {
+  needDb();
+  if (!/^[a-f0-9]{1,64}$/i.test(id)) throw new GmailError("Invalid receipt ID.");
+  const item = (await readItems()).items.find(i => i.id === id);
+  if (!item || item.kind !== "receipt" || item.status !== "confirmed" || !item.scope) throw new GmailError("Review and assign this receipt first.", 409);
+  const key = `gmail-receipt-original-${id}`;
+  const cached = await getFile(key);
+  if (cached) return Buffer.from(unseal<{ raw: string }>(cached.data.toString("utf8")).raw, "base64url");
+  const keys = await getKeys();
+  if (!keys) throw new GmailError("Connect Gmail to retrieve the original receipt.", 409);
+  const raw = await api<{ raw?: string }>(await freshTokens(keys), `/messages/${encodeURIComponent(id)}?format=raw`);
+  if (!raw.raw || !/^[A-Za-z0-9_=-]+$/.test(raw.raw)) throw new GmailError("Gmail did not return the original receipt.", 502);
+  const original = Buffer.from(raw.raw, "base64url");
+  if (original.length > 16 * 1024 * 1024) throw new GmailError("This email is over 16 MB. Save its original directly in Gmail.", 413);
+  await putFile(key, "application/octet-stream", Buffer.from(seal({ raw: raw.raw })));
+  return original;
 }
 
 export async function status() {

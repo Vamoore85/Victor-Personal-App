@@ -9,6 +9,7 @@ import { Card, Field, buttonClass, ghostButtonClass, inputClass } from "@/featur
 import { addDays, prettyDate, today } from "@/lib/dates";
 import { gmailLink, suggestBill, suggestScope } from "./match";
 import type { EmailItem } from "./parse";
+import { ReceiptFolders } from "./ReceiptFolders";
 
 /*
  * Email bills: a read-only Gmail link that finds bills and receipts in a date
@@ -102,6 +103,7 @@ export function EmailBillsScreen() {
         <>
           <Connection status={status} reload={load} />
           {status.connected && <Scan status={status} reload={load} />}
+          <ReceiptFolders items={status.items} />
           {status.items.length > 0 && <Review status={status} reload={load} onItem={onItem} />}
         </>
       )}
@@ -116,7 +118,7 @@ function ScopeNote() {
       <ul className="mt-2 list-disc space-y-1 pl-5 text-zinc-600 dark:text-zinc-400">
         <li>Only when you press Scan, and only the date range you pick (90 days unless you choose another).</li>
         <li>Only emails that look like bills or receipts. Chats, promotions, social and forum mail are skipped, and an email that isn&apos;t a bill or receipt is dropped without saving anything from it.</li>
-        <li>From each bill it keeps the sender, subject, amount, the dates the email states and a link back to it. Not the rest of the email, and not attachments.</li>
+        <li>A scan saves the sender, subject, amount, dates and source reference. Download folder also retrieves and privately archives the original reviewed receipt emails, including their attachments, so they can be included in your ZIP.</li>
         <li>Read-only. It can&apos;t send, delete, move or mark email, and it never asks for your Google password: Google&apos;s own screen does the sign-in.</li>
         <li>Disconnect any time below, or at your Google account&apos;s Third-party connections page.</li>
       </ul>
@@ -408,6 +410,7 @@ function ItemRow({
   const [merchant, setMerchant] = useState(item.merchant);
   const [amount, setAmount] = useState(item.amount === null ? "" : String(item.amount));
   const [due, setDue] = useState(item.dueDate ?? "");
+  const [receiptDate, setReceiptDate] = useState(item.billDate ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -427,7 +430,7 @@ function ItemRow({
   const edits = () => ({
     merchant,
     amount: amount.trim() === "" ? null : Number(amount),
-    ...(item.kind === "bill" ? { dueDate: due || null } : {}),
+    ...(item.kind === "bill" ? { dueDate: due || null } : { billDate: receiptDate || null }),
   });
 
   const linked = item.billId ? data?.bills.find((b) => b.id === item.billId) : undefined;
@@ -522,6 +525,11 @@ function ItemRow({
               {item.kind === "bill" && (
                 <Field label="Due date">
                   <input className={inputClass} type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+                </Field>
+              )}
+              {item.kind === "receipt" && (
+                <Field label="Receipt date">
+                  <input className={inputClass} type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} />
                 </Field>
               )}
             </div>
