@@ -9,7 +9,7 @@ import { Card, Field, buttonClass, ghostButtonClass, inputClass } from "@/featur
 import { prettyDate, today } from "@/lib/dates";
 import { gmailLink, suggestBill, suggestScope } from "./match";
 import type { EmailItem } from "./parse";
-import { scanRange } from "./scan-history";
+import { SCAN_BATCH_SIZE, scanRange } from "./scan-history";
 import { ReceiptFolders } from "@/features/receipts/ReceiptFolders";
 
 /*
@@ -334,7 +334,7 @@ function Scan({ status, reload, onYearChange }: { status: Status; reload: () => 
         {busy ? <button className={ghostButtonClass} onClick={() => { paused.current = true; setBatchNote("Pausing after the current batch…"); }}>Pause</button> : samePeriod && last.capped ? <button className={ghostButtonClass} onClick={() => void run(true)}>Restart period</button> : null}
       </div>
       <p className="mt-2 text-xs text-zinc-500">
-        Searches email from {short(from)} to {short(to)}. Up to 400 messages per batch; saved progress continues into older results.
+        Searches email from {short(from)} to {short(to)}. Up to {SCAN_BATCH_SIZE} messages per batch; saved progress continues into older results.
       </p>
       {batchNote && <p role="status" className="mt-2 text-sm">{batchNote}</p>}
       {error && <p className="mt-2 text-sm text-rose-600">{error}</p>}

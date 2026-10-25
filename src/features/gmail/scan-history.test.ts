@@ -20,10 +20,10 @@ test("400-message batch saves the next page, so noise-only results cannot trap s
     const end = Math.min(start + limit, 550);
     return { ids: Array.from({ length: end - start }, (_, i) => `message-${start + i}`), page: end < 550 ? String(end) : undefined };
   };
-  const first = await collectScanBatch(empty(), list);
+  const first = await collectScanBatch(empty(), list, 400);
   assert.equal(first.ids.length, 400);
   assert.equal(first.page, "400");
-  const second = await collectScanBatch({ ...empty(), page: first.page, looked: first.listed }, list);
+  const second = await collectScanBatch({ ...empty(), page: first.page, looked: first.listed }, list, 400);
   assert.equal(second.ids.length, 150);
   assert.equal(second.ids[0], "message-400");
   assert.equal(second.page, undefined);
