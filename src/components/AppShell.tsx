@@ -21,7 +21,7 @@ import { FreshBuild } from "./FreshBuild";
 const BARE = ["/login", "/security", "/trust"];
 
 /** Phone tab bar: the screens used most. Everything else is under More. */
-const TABS = ["money", "accounts", "reports"];
+const TABS = ["money", "accounts", "logins", "reports"];
 
 const live = [...LIFE_AREAS.filter((a) => a.href).map((a) => a.slug === "money" ? { ...a, label: "Money" } : a),
   { slug: "reports", short: "Reports", group: "work", label: "Reports", blurb: "Financial reports", href: "/reports" },
@@ -168,7 +168,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* Phone: fixed bottom tab bar */}
       <nav
         aria-label="Tabs"
-        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-zinc-200 bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden dark:border-zinc-800"
+        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-6 border-t border-zinc-200 bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden dark:border-zinc-800"
       >
         {[{ href: "/", slug: "home", short: "Home" }, ...tabs.map((a) => ({ href: a.href!, slug: a.slug, short: a.short }))].map((t) => {
           const active = isActive(pathname, t.href);

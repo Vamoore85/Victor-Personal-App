@@ -4,18 +4,16 @@ import Link from "next/link";
 import { useMemo, useState, type FormEvent } from "react";
 import { accountLabel, cleanAccounts } from "./accounts-fix";
 import { accountBalance, accountTypeLabel, isLiability, money, shortDate } from "./calc";
-import { PasteLogins } from "./logins-paste-ui";
 import { ENTITIES, upcoming, type UpcomingLine } from "./outlook";
 import { scopeOf, ScopeField } from "./scope";
 import { newId, setMoneyData, useMoneyData } from "./store";
 import { ACCOUNT_TYPES, type Account, type AccountType, type Institution, type MoneyData, type Scope } from "./types";
 import { Card, Field, Stat, buttonClass, inputClass } from "./ui";
-import { InstitutionLogins, VaultBar } from "./vault-ui";
 
 /*
- * Every account, bill and login by company, on one page, with what each one
- * leaves you with. Adding an account is open; passwords live in the vault and
- * only show after you unlock it. Editing and bank connections stay on Money.
+ * Every account and bill by company, on one page, with what each one leaves
+ * you with. Adding an account is open; editing and bank connections stay on
+ * Money. Logins have their own page (LoginsPage.tsx).
  */
 
 // Same company colors as the Bills page.
@@ -31,7 +29,6 @@ type CompanyBooks = {
   confirmed: number;
   accounts: { account: Account; balance: number }[];
   bills: UpcomingLine[];
-  institutions: Institution[];
 };
 
 function booksByCompany(d: MoneyData, lines: UpcomingLine[]): CompanyBooks[] {
@@ -50,7 +47,6 @@ function booksByCompany(d: MoneyData, lines: UpcomingLine[]): CompanyBooks[] {
       confirmed: round(confirmed),
       accounts,
       bills,
-      institutions: d.institutions.filter((i) => scopeOf(i) === id).sort((a, b) => a.name.localeCompare(b.name)),
     };
   });
 }
@@ -74,8 +70,6 @@ function AccountsView({ data }: { data: MoneyData }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <VaultBar />
-
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Cash, all companies" value={money(cash)} />
         <Stat label="Owed on cards and loans" value={money(total((c) => c.owed))} />
@@ -103,9 +97,8 @@ function AccountsView({ data }: { data: MoneyData }) {
         </section>
       )}
 
-      <PasteLogins data={data} />
-
       <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-zinc-500">
+        <Link href="/logins" className="underline hover:text-brand">Logins</Link>
         <Link href="/money?tab=bills" className="underline hover:text-brand">All bills</Link>
         <Link href="/money?tab=accounts" className="underline hover:text-brand">Edit or rename accounts</Link>
         <Link href="/integrations" className="underline hover:text-brand">Connect a bank</Link>
@@ -188,28 +181,6 @@ function CompanySection({ books, data }: { books: CompanyBooks; data: MoneyData 
           )}
         </div>
 
-        <div>
-          <h3 className="mb-1 text-sm font-medium text-zinc-500">Logins</h3>
-          {books.institutions.length === 0 ? (
-            <p className="text-sm text-zinc-500">No companies yet. Add a bank above, or paste logins below.</p>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {books.institutions.map((inst) => (
-                <div key={inst.id} className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
-                  <div className="flex items-baseline justify-between gap-3">
-                    <p className="font-medium">{inst.name}</p>
-                    {inst.loginUrl && (
-                      <a href={inst.loginUrl} target="_blank" rel="noopener noreferrer" className="text-sm underline decoration-zinc-300 underline-offset-2 hover:decoration-zinc-900 dark:decoration-zinc-600">
-                        Sign in ↗
-                      </a>
-                    )}
-                  </div>
-                  <InstitutionLogins institution={inst} />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
     </section>
   );
