@@ -11,6 +11,7 @@ type Status = {
   database?: boolean;
   error?: string;
   banks?: { connections: number; institutions: string[]; problems: number; lastSync: string | null; accounts: { name: string; last4: string; company: string }[] };
+  gmail?: { keys: boolean; connected: boolean; connectedAt: string | null; lastScan: string | null; review: number } | null;
   quickbooks?: { connected: boolean; companyName: string | null; connectedAt: string | null } | null;
 };
 
@@ -95,6 +96,7 @@ export function IntegrationsScreen() {
   }, []);
   const banks = s?.banks;
   const qb = s?.quickbooks;
+  const gm = s?.gmail;
   const ring = c.apps.ring?.allowed ?? {};
 
   return (
@@ -137,6 +139,20 @@ export function IntegrationsScreen() {
             action={
               <Link href="/money" className={btn}>
                 {qb?.connected ? "Manage" : "Connect"}
+              </Link>
+            }
+          />
+          <IntegrationCard
+            testId="int-gmail"
+            name="Gmail (bills and receipts)"
+            state={!s ? "Checking…" : gm?.connected ? "Connected" : gm?.keys ? "Not connected" : "Needs setup"}
+            tone={gm?.connected ? "on" : "off"}
+            purpose="Finds bills and receipts in your Gmail for the date range you pick, for you to review and assign to Personal, Maverick or Gladiator."
+            rows={gm?.connected ? [["Connected", ago(gm.connectedAt)], ["Last scan", ago(gm.lastScan)], ["To review", String(gm.review)]] : []}
+            permissions="Read-only, bill and receipt emails only. Maverick can't send, delete or move email."
+            action={
+              <Link href="/email-bills" className={btn}>
+                {gm?.connected ? "Open email bills" : "Set up"}
               </Link>
             }
           />

@@ -3,6 +3,7 @@ import { dbConfigured, readDoc } from "@/lib/db";
 import { asMoney, MONEY_DOC } from "@/lib/money-doc";
 import { sameOrigin, signedIn } from "@/lib/plaid-server";
 import { status as quickbooksStatus } from "@/lib/quickbooks";
+import { status as gmailStatus } from "@/lib/gmail";
 import { accountLabel, cleanAccounts } from "@/features/money/accounts-fix";
 
 // What the Integrations page shows for each connection: status, what's
@@ -15,7 +16,7 @@ export async function GET(req: Request) {
   if (!signedIn(req)) return Response.json({ error: "Sign in first." }, { status: 401 });
   if (!dbConfigured()) return Response.json({ database: false });
   try {
-    const [doc, qb] = await Promise.all([readDoc(MONEY_DOC), quickbooksStatus().catch(() => null)]);
+    const [doc, qb, gm] = await Promise.all([readDoc(MONEY_DOC), quickbooksStatus().catch(() => null), gmailStatus().catch(() => null)]);
     const d = cleanAccounts(asMoney(doc?.data ?? null)).data; // the same one-copy-per-account view Money shows (read only here)
     const live = d.bankLinks.filter((l) => !l.duplicateOf);
     const liveIds = new Set(live.map((l) => l.id));
@@ -32,6 +33,7 @@ export async function GET(req: Request) {
         lastSync,
         accounts,
       },
+      gmail: gm ? { keys: gm.keys, connected: gm.connected, connectedAt: gm.connectedAt, lastScan: gm.lastScan?.at ?? null, review: gm.counts.review } : null,
       quickbooks: qb ? { connected: qb.connected, companyName: qb.companyName, connectedAt: qb.connectedAt } : null,
     });
   } catch (e) {

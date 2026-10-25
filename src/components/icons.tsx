@@ -24,6 +24,7 @@ const PATHS: Record<string, string> = {
   close: "M6 6l12 12M18 6 6 18",
   shield: "M12 3 5 6v5c0 4.5 3 8.3 7 10 4-1.7 7-5.5 7-10V6z",
   logins: "M15 9a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM13.8 11.8 21 19v2h-3v-2h-2v-2h-2l-1.4-1.4",
+  emailbills: "M3 6a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1zM3 7l9 6 9-6",
   key: "M15 9a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM13.8 11.8 21 19v2h-3v-2h-2v-2h-2l-1.4-1.4",
   logout: "M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l-5-5 5-5M5 12h11",
   chevron: "M9 6l6 6-6 6",

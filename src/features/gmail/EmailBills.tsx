@@ -1,0 +1,586 @@
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { money } from "@/features/money/calc";
+import { newId, setMoneyData, useMoneyData } from "@/features/money/store";
+import type { Bill, MoneyData, Scope } from "@/features/money/types";
+import { Card, Field, buttonClass, ghostButtonClass, inputClass } from "@/features/money/ui";
+import { addDays, prettyDate, today } from "@/lib/dates";
+import { gmailLink, suggestBill, suggestScope } from "./match";
+import type { EmailItem } from "./parse";
+
+/*
+ * Email bills: a read-only Gmail link that finds bills and receipts in a date
+ * range you pick and lists them for you to review. What an email says is due
+ * or paid is kept apart from your bank: it never fills in "Date taken out".
+ * The Google keys and sign-in tokens stay on the server (src/lib/gmail.ts).
+ */
+
+type ScanInfo = { from: string; to: string; at: string; looked: number; kept: number; added: number; duplicates: number; capped: boolean };
+type Status = {
+  database: boolean;
+  keys: boolean;
+  keysFromSettings: boolean;
+  connected: boolean;
+  email: string | null;
+  connectedAt: string | null;
+  lastScan: ScanInfo | null;
+  maxDays: number;
+  redirectUri: string;
+  items: EmailItem[];
+};
+
+const COMPANY: Record<Scope, string> = { personal: "Personal", business: "Maverick", gladiator: "Gladiator" };
+const PILL: Record<Scope, string> = {
+  business: "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300",
+  personal: "bg-green-50 text-green-700 dark:bg-green-950/50 dark:text-green-300",
+  gladiator: "bg-orange-50 text-orange-700 dark:bg-orange-950/50 dark:text-orange-300",
+};
+const RANGES = [30, 60, 90, 180];
+
+const NOTICES: Record<string, string> = {
+  connected: "Gmail is connected. Press Scan to look for bills.",
+  cancelled: "Google sign-in was cancelled. Nothing was connected.",
+  expired: "That sign-in took too long. Press Connect Gmail again.",
+  nokeys: "Add the Google keys first.",
+  failed: "Google sign-in didn't finish. Try again.",
+};
+
+async function call<T>(path: string, body?: Record<string, unknown>): Promise<T> {
+  const res = await fetch(`/api/gmail/${path}`, {
+    method: body ? "POST" : "GET",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || "Couldn't reach Gmail.");
+  return json as T;
+}
+
+const short = (ymd: string) => prettyDate(ymd, { month: "short", day: "numeric", year: "numeric" });
+
+export function EmailBillsScreen() {
+  const [status, setStatus] = useState<Status | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setStatus(await call<Status>("status"));
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, []);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const v = url.searchParams.get("gmail");
+    if (v) {
+      url.searchParams.delete("gmail");
+      window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    }
+    call<Status>("status")
+      .then((st) => {
+        setStatus(st);
+        if (v) setNotice(NOTICES[v] ?? v);
+      })
+      .catch((e: Error) => setError(e.message));
+  }, []);
+
+  const onItem = useCallback((item: EmailItem) => setStatus((s) => s && { ...s, items: s.items.map((i) => (i.id === item.id ? item : i)) }), []);
+
+  return (
+    <div className="flex flex-col gap-4" data-testid="email-bills">
+      {notice && <p className="rounded-xl border border-emerald-400 bg-emerald-50 px-4 py-3 text-sm dark:bg-emerald-950/40">{notice}</p>}
+      {error && <p className="rounded-xl border border-amber-400 bg-amber-50 px-4 py-3 text-sm dark:bg-amber-950/40">{error}</p>}
+      <ScopeNote />
+      {!status ? (
+        !error && <p className="text-sm text-zinc-500">Loading…</p>
+      ) : (
+        <>
+          <Connection status={status} reload={load} />
+          {status.connected && <Scan status={status} reload={load} />}
+          {status.items.length > 0 && <Review status={status} reload={load} onItem={onItem} />}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ScopeNote() {
+  return (
+    <section className="rounded-xl border border-zinc-200 bg-surface p-4 text-sm dark:border-zinc-800" data-testid="gmail-scope">
+      <h2 className="font-medium">What Maverick reads in your Gmail</h2>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-zinc-600 dark:text-zinc-400">
+        <li>Only when you press Scan, and only the date range you pick (90 days unless you choose another).</li>
+        <li>Only emails that look like bills or receipts. Chats, promotions, social and forum mail are skipped, and an email that isn&apos;t a bill or receipt is dropped without saving anything from it.</li>
+        <li>From each bill it keeps the sender, subject, amount, the dates the email states and a link back to it. Not the rest of the email, and not attachments.</li>
+        <li>Read-only. It can&apos;t send, delete, move or mark email, and it never asks for your Google password: Google&apos;s own screen does the sign-in.</li>
+        <li>Disconnect any time below, or at your Google account&apos;s Third-party connections page.</li>
+      </ul>
+    </section>
+  );
+}
+
+function Connection({ status, reload }: { status: Status; reload: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!status.database) return <Card title="Gmail">The online database isn&apos;t set up, so Gmail can&apos;t be connected.</Card>;
+  if (!status.keys) {
+    return (
+      <Card title="Set up Gmail (one time)">
+        <Setup redirectUri={status.redirectUri} onSaved={reload} />
+      </Card>
+    );
+  }
+  if (!status.connected) {
+    return (
+      <Card title="Gmail">
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          Not connected. Google will show its own screen asking to let Maverick <b>read</b> your email. Approve it there; nothing is connected until you do.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <a href="/api/gmail/connect" className={buttonClass} data-testid="gmail-connect">
+            Connect Gmail
+          </a>
+          {!status.keysFromSettings && <ReplaceKeys redirectUri={status.redirectUri} onSaved={reload} />}
+        </div>
+      </Card>
+    );
+  }
+  async function disconnect() {
+    if (!window.confirm("Disconnect Gmail? Maverick's access is revoked at Google. Bills you already found stay here.")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await call("disconnect", {});
+      await reload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card title="Gmail">
+      <p className="text-sm">
+        Connected{status.email ? <> as <b>{status.email}</b></> : null}
+        {status.connectedAt ? ` since ${short(status.connectedAt.slice(0, 10))}` : ""}. Read-only.
+      </p>
+      {error && <p className="mt-2 text-sm text-rose-600">{error}</p>}
+      <div className="mt-3">
+        <button className={ghostButtonClass} onClick={disconnect} disabled={busy}>
+          {busy ? "Disconnecting…" : "Disconnect Gmail"}
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+function Setup({ redirectUri, onSaved }: { redirectUri: string; onSaved: () => Promise<void> }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="flex flex-col gap-4 text-sm">
+      <p className="text-zinc-600 dark:text-zinc-400">Google needs to know about your site once before it will show its sign-in screen. In Google Cloud, signed in as yourself:</p>
+      <ol className="list-decimal space-y-2 pl-5">
+        <li>
+          <a className="text-brand underline" href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noreferrer">
+            Create a project
+          </a>{" "}
+          named Maverick.
+        </li>
+        <li>
+          <a className="text-brand underline" href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" target="_blank" rel="noreferrer">
+            Turn on the Gmail API
+          </a>
+          .
+        </li>
+        <li>
+          <a className="text-brand underline" href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noreferrer">
+            Set up the sign-in screen
+          </a>
+          : app name Maverick, audience External, and under Audience add your Gmail address as a test user.
+        </li>
+        <li>
+          <a className="text-brand underline" href="https://console.cloud.google.com/auth/clients/create" target="_blank" rel="noreferrer">
+            Create a client
+          </a>
+          : type Web application, and add this as the authorized redirect URI:
+          <div className="mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-zinc-200 p-2 dark:border-zinc-800">
+            <code className="break-all">{redirectUri}</code>
+            <button type="button" className={ghostButtonClass} onClick={() => void navigator.clipboard?.writeText(redirectUri).then(() => setCopied(true))}>
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+        </li>
+        <li>Paste the client ID and secret Google shows you below.</li>
+      </ol>
+      <KeysForm onSaved={onSaved} />
+    </div>
+  );
+}
+
+function KeysForm({ onSaved }: { onSaved: () => Promise<void> }) {
+  const [clientId, setClientId] = useState("");
+  const [secret, setSecret] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await call("keys", { clientId, secret });
+      setClientId("");
+      setSecret("");
+      await onSaved();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-3">
+      <p className="text-xs text-zinc-500">Paste them here, not in chat. They&apos;re locked with your site password and only this site&apos;s server can read them.</p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field label="Client ID">
+          <input className={inputClass} value={clientId} onChange={(e) => setClientId(e.target.value)} autoComplete="off" spellCheck={false} placeholder="….apps.googleusercontent.com" />
+        </Field>
+        <Field label="Client secret">
+          <input className={inputClass} type="password" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" />
+        </Field>
+      </div>
+      {error && <p className="text-sm text-rose-600">{error}</p>}
+      <div>
+        <button className={buttonClass} disabled={busy || !clientId || !secret}>
+          {busy ? "Saving…" : "Save keys"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function ReplaceKeys({ redirectUri, onSaved }: { redirectUri: string; onSaved: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  if (!open)
+    return (
+      <button type="button" className={ghostButtonClass} onClick={() => setOpen(true)}>
+        Change keys
+      </button>
+    );
+  return (
+    <div className="mt-2 w-full">
+      <Setup redirectUri={redirectUri} onSaved={async () => (await onSaved(), setOpen(false))} />
+    </div>
+  );
+}
+
+function Scan({ status, reload }: { status: Status; reload: () => Promise<void> }) {
+  const [days, setDays] = useState(90);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const to = today();
+  const from = addDays(to, -(days - 1));
+  const last = status.lastScan;
+  async function run() {
+    setBusy(true);
+    setError(null);
+    try {
+      await call("scan", { days });
+      await reload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card title="Scan for bills and receipts">
+      <div className="flex flex-wrap items-end gap-3">
+        <Field label="Look back">
+          <select className={inputClass} value={days} onChange={(e) => setDays(Number(e.target.value))} data-testid="gmail-range">
+            {RANGES.filter((d) => d <= status.maxDays).map((d) => (
+              <option key={d} value={d}>
+                Last {d} days
+              </option>
+            ))}
+          </select>
+        </Field>
+        <button className={buttonClass} onClick={run} disabled={busy} data-testid="gmail-scan">
+          {busy ? "Scanning…" : "Scan"}
+        </button>
+      </div>
+      <p className="mt-2 text-xs text-zinc-500">
+        Searches email from {short(from)} to {short(to)}, up to 400 messages.
+      </p>
+      {error && <p className="mt-2 text-sm text-rose-600">{error}</p>}
+      {last && (
+        <p className="mt-2 text-sm" data-testid="gmail-last-scan">
+          Last scan {short(last.from)} to {short(last.to)}: looked at {last.looked} emails, kept {last.kept} bills and receipts ({last.added} new
+          {last.duplicates ? `, ${last.duplicates} repeats` : ""}).
+          {last.capped && " It stopped at 400 emails; pick a shorter range to see the rest."}
+        </p>
+      )}
+    </Card>
+  );
+}
+
+type Tab = "review" | "confirmed" | "ignored" | "duplicate";
+const TABS: { id: Tab; label: string }[] = [
+  { id: "review", label: "To review" },
+  { id: "confirmed", label: "Confirmed" },
+  { id: "duplicate", label: "Repeats" },
+  { id: "ignored", label: "Not bills" },
+];
+
+function Review({ status, reload, onItem }: { status: Status; reload: () => Promise<void>; onItem: (item: EmailItem) => void }) {
+  const data = useMoneyData();
+  const [tab, setTab] = useState<Tab>("review");
+  const items = status.items;
+  const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  const shown = items.filter((i) => i.status === tab);
+
+  async function change(id: string, c: Record<string, unknown>) {
+    const { item } = await call<{ item: EmailItem }>("items", { id, ...c });
+    onItem(item);
+  }
+
+  return (
+    <Card title="Found in your email">
+      <p className="mb-3 text-xs text-zinc-500">
+        What an email says is due or paid. These are not bank payments: the date money actually came out only ever comes from your bank, on{" "}
+        <Link href="/logins" className="underline">
+          Logins
+        </Link>{" "}
+        and Transactions.
+      </p>
+      <div className="mb-3 flex flex-wrap gap-1.5" role="tablist">
+        {TABS.map((t) => {
+          const n = items.filter((i) => i.status === t.id).length;
+          return (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={tab === t.id}
+              onClick={() => setTab(t.id)}
+              className={`rounded-full px-3 py-1 text-sm ${tab === t.id ? "bg-brand text-on-brand" : "border border-zinc-300 dark:border-zinc-700"}`}
+            >
+              {t.label} ({n})
+            </button>
+          );
+        })}
+        <button className="ml-auto text-xs text-zinc-500 underline" onClick={() => void reload()}>
+          Refresh
+        </button>
+      </div>
+      {shown.length === 0 ? (
+        <p className="text-sm text-zinc-500">{tab === "review" ? "Nothing left to review." : "None."}</p>
+      ) : (
+        <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
+          {shown.map((i) => (
+            <ItemRow key={i.id} item={i} first={i.duplicateOf ? byId.get(i.duplicateOf) : undefined} email={status.email} data={data} change={change} />
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function ItemRow({
+  item,
+  first,
+  email,
+  data,
+  change,
+}: {
+  item: EmailItem;
+  first?: EmailItem;
+  email: string | null;
+  data: MoneyData | null;
+  change: (id: string, c: Record<string, unknown>) => Promise<void>;
+}) {
+  const hint = useMemo(() => (data ? suggestScope(item, data.institutions, data.bills) : null), [item, data]);
+  const [scope, setScope] = useState<Scope | "">(item.scope ?? hint?.scope ?? "");
+  const [editing, setEditing] = useState(false);
+  const [merchant, setMerchant] = useState(item.merchant);
+  const [amount, setAmount] = useState(item.amount === null ? "" : String(item.amount));
+  const [due, setDue] = useState(item.dueDate ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function act(c: Record<string, unknown>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await change(item.id, c);
+      setEditing(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const edits = () => ({
+    merchant,
+    amount: amount.trim() === "" ? null : Number(amount),
+    ...(item.kind === "bill" ? { dueDate: due || null } : {}),
+  });
+
+  const linked = item.billId ? data?.bills.find((b) => b.id === item.billId) : undefined;
+  const match = item.status === "confirmed" && item.scope && !item.billId && data ? suggestBill(item, item.scope, data.bills) : null;
+
+  function addAsBill() {
+    if (!item.scope || item.amount === null || !item.dueDate) return;
+    const bill: Bill = {
+      id: newId(),
+      name: item.merchant,
+      amount: item.amount,
+      category: "Bills",
+      frequency: "monthly",
+      nextDue: item.dueDate,
+      dueDay: Number(item.dueDate.slice(8, 10)),
+      accountId: "",
+      autopay: false,
+      scope: item.scope,
+      note: "Added from an email bill (what the email said was due, not a bank payment).",
+    };
+    setMoneyData((d) => ({ ...d, bills: [...d.bills, bill] }));
+    void act({ billId: bill.id });
+  }
+
+  return (
+    <li className="flex flex-col gap-2 py-3" data-testid="gmail-item">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="font-medium">
+            {item.merchant}{" "}
+            <span className="ml-1 rounded-full bg-zinc-100 px-2 py-0.5 align-middle text-xs font-normal text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+              {item.kind === "bill" ? "Bill (expected)" : "Receipt (per email)"}
+            </span>
+            {item.status === "confirmed" && item.scope && <span className={`ml-1 rounded-full px-2 py-0.5 align-middle text-xs ${PILL[item.scope]}`}>{COMPANY[item.scope]}</span>}
+          </p>
+          <p className="truncate text-xs text-zinc-500">{item.subject}</p>
+        </div>
+        <p className="text-lg font-semibold tabular-nums">{item.amount === null ? "No amount" : item.currency === "USD" ? money(item.amount) : `${item.amount.toFixed(2)} ${item.currency}`}</p>
+      </div>
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs sm:grid-cols-4">
+        {item.kind === "bill" && (
+          <div>
+            <dt className="text-zinc-500">Due date (email)</dt>
+            <dd>{item.dueDate ? short(item.dueDate) : "Not in email"}</dd>
+          </div>
+        )}
+        <div>
+          <dt className="text-zinc-500">{item.kind === "bill" ? "Bill date (email)" : "Receipt date (email)"}</dt>
+          <dd>{item.billDate ? short(item.billDate) : "Not in email"}</dd>
+        </div>
+        <div>
+          <dt className="text-zinc-500">Email received</dt>
+          <dd>{short(item.emailDate)}</dd>
+        </div>
+        <div>
+          <dt className="text-zinc-500">Source</dt>
+          <dd>
+            <a href={gmailLink(item.id, email)} target="_blank" rel="noreferrer" className="text-brand underline">
+              Open in Gmail
+            </a>
+          </dd>
+        </div>
+      </dl>
+      {item.evidence && <p className="truncate text-xs text-zinc-500">“{item.evidence}”</p>}
+      {item.flags.length > 0 && item.status !== "confirmed" && (
+        <ul className="list-disc pl-5 text-xs text-amber-700 dark:text-amber-400">
+          {item.flags.map((f) => (
+            <li key={f}>{f}</li>
+          ))}
+        </ul>
+      )}
+
+      {item.status === "duplicate" && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+          Looks like a repeat of the {first ? `${first.merchant} email from ${short(first.emailDate)}` : "email above"}.
+          <button className={ghostButtonClass} disabled={busy} onClick={() => void act({ status: "review" })}>
+            Not a repeat
+          </button>
+        </div>
+      )}
+
+      {item.status === "review" && (
+        <div className="flex flex-col gap-2">
+          {editing && (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <Field label="Company name">
+                <input className={inputClass} value={merchant} onChange={(e) => setMerchant(e.target.value)} />
+              </Field>
+              <Field label="Amount">
+                <input className={inputClass} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
+              </Field>
+              {item.kind === "bill" && (
+                <Field label="Due date">
+                  <input className={inputClass} type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+                </Field>
+              )}
+            </div>
+          )}
+          <div className="flex flex-wrap items-end gap-2">
+            <Field label="Company">
+              <select className={inputClass} value={scope} onChange={(e) => setScope(e.target.value as Scope | "")} data-testid="gmail-company">
+                <option value="">Pick one…</option>
+                <option value="personal">Personal</option>
+                <option value="business">Maverick</option>
+                <option value="gladiator">Gladiator</option>
+              </select>
+            </Field>
+            <button className={buttonClass} disabled={busy || !scope} onClick={() => void act({ status: "confirmed", scope, ...(editing ? edits() : {}) })}>
+              Confirm
+            </button>
+            <button className={ghostButtonClass} disabled={busy} onClick={() => (editing ? void act(edits()) : setEditing(true))}>
+              {editing ? "Save changes" : "Fix details"}
+            </button>
+            <button className={ghostButtonClass} disabled={busy} onClick={() => void act({ status: "ignored" })}>
+              Not a bill
+            </button>
+          </div>
+          {hint && <p className="text-xs text-zinc-500">{hint.scope ? `Suggested ${COMPANY[hint.scope]}: ${hint.why}. Check it before confirming.` : hint.why}</p>}
+        </div>
+      )}
+
+      {item.status === "confirmed" && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {linked ? (
+            <span className="text-zinc-600 dark:text-zinc-400">Saved bill: {linked.name}</span>
+          ) : match ? (
+            <button className={ghostButtonClass} disabled={busy} onClick={() => void act({ billId: match.id })}>
+              Link to saved bill {match.name}
+            </button>
+          ) : item.kind === "bill" && item.amount !== null && item.dueDate ? (
+            <button className={ghostButtonClass} disabled={busy || !data} onClick={addAsBill}>
+              Add as a saved monthly bill
+            </button>
+          ) : null}
+          {item.billId && (
+            <button className="text-zinc-500 underline" disabled={busy} onClick={() => void act({ billId: null })}>
+              Unlink
+            </button>
+          )}
+          <button className="text-zinc-500 underline" disabled={busy} onClick={() => void act({ status: "review" })}>
+            Back to review
+          </button>
+        </div>
+      )}
+
+      {item.status === "ignored" && (
+        <div>
+          <button className={ghostButtonClass} disabled={busy} onClick={() => void act({ status: "review" })}>
+            It is a bill
+          </button>
+        </div>
+      )}
+      {error && <p className="text-sm text-rose-600">{error}</p>}
+    </li>
+  );
+}
