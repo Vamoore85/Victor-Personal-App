@@ -18,7 +18,7 @@ test("scheduled reads require the exact server secret and reject missing or weak
 
 test("the registered background schedule matches the displayed interval and bounded recent window",()=> {
   const config=JSON.parse(readFileSync(new URL("../../../vercel.json",import.meta.url),"utf8"));
-  assert.deepEqual(config.crons,[{path:"/api/gmail/auto-scan",schedule:"*/30 * * * *"}]);
+  assert.deepEqual(config.crons,[{path:"/api/gmail/auto-scan",schedule:"*/30 * * * *"},{path:"/api/gmail/history-scan",schedule:"2-59/5 * * * *"}]);
   assert.equal(AUTO_SCAN_LABEL,"Every 30 minutes");
   assert.equal(AUTO_SCAN_DAYS,7);
 });

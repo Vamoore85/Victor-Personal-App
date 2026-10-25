@@ -3,6 +3,7 @@ export const VERIFIER_COOKIE = "gmail_pkce";
 
 import { sameOrigin, signedIn } from "@/lib/plaid-server";
 import { GmailError } from "@/lib/gmail";
+import { gmailJson } from "@/lib/gmail-response";
 
 /** Signed-in, same-site JSON calls, with plain-English errors. Never logs mail contents. */
 export function handle(fn: (body: Record<string, unknown>, req: Request) => Promise<unknown>) {
@@ -11,7 +12,7 @@ export function handle(fn: (body: Record<string, unknown>, req: Request) => Prom
     if (!signedIn(req)) return Response.json({ error: "Sign in first." }, { status: 401 });
     try {
       const body = req.method === "GET" ? {} : ((await req.json().catch(() => ({}))) as Record<string, unknown>);
-      return Response.json(await fn(body, req), { headers: { "cache-control": "no-store" } });
+      return gmailJson(await fn(body, req));
     } catch (e) {
       if (!(e instanceof GmailError)) console.error("gmail", (e as Error)?.name ?? "error");
       const err = e instanceof GmailError ? e : new GmailError("Something went wrong talking to Gmail.", 500);
