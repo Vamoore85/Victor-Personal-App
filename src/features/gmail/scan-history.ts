@@ -1,3 +1,5 @@
+export const SCAN_BATCH_SIZE = 100;
+
 export type ScanCursor = {
   page?: string;
   retryIds: string[];
@@ -24,7 +26,7 @@ export function claimScan(previous: ScanCursor | undefined, id: string, now: num
   return { ...cursor, lease: { id, until: now + 150000 } };
 }
 
-export async function collectScanBatch(cursor: ScanCursor, list: (page: string | undefined, limit: number) => Promise<{ ids: string[]; page?: string }>, limit = 400) {
+export async function collectScanBatch(cursor: ScanCursor, list: (page: string | undefined, limit: number) => Promise<{ ids: string[]; page?: string }>, limit = SCAN_BATCH_SIZE) {
   const ids = [...cursor.retryIds];
   let page = cursor.page;
   let listed = 0;

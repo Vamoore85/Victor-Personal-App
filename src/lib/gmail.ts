@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 import { dbConfigured, getFile, putFile, readDoc, writeDoc } from "@/lib/db";
 import { extract, mergeFound, RULES, type EmailItem, type EmailStatus, type RawMessage } from "@/features/gmail/parse";
 import type { Scope } from "@/features/money/types";
-import { claimScan, collectScanBatch, scanKey, scanRange, type ScanCursor } from "@/features/gmail/scan-history";
+import { SCAN_BATCH_SIZE, claimScan, collectScanBatch, scanKey, scanRange, type ScanCursor } from "@/features/gmail/scan-history";
 import { gmailFailure } from "@/features/gmail/api-errors";
 
 /*
@@ -36,8 +36,8 @@ const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 export const SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 
 export const MAX_DAYS = 180;
-export const MAX_MESSAGES = 400; // emails read per scan; the next scan carries on with the rest
-const MAX_RECHECK = 150;
+export const MAX_MESSAGES = SCAN_BATCH_SIZE; // save progress frequently while reading older mail
+const MAX_RECHECK = 25;
 
 export class GmailError extends Error {
   constructor(
