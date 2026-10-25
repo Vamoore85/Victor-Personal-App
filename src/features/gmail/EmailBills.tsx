@@ -179,32 +179,30 @@ function Connection({ status, reload }: { status: Status; reload: () => Promise<
   );
 }
 
+// Your Google Cloud project for this site. The other project, Maverick Life OS, isn't used.
+const GOOGLE_PROJECT = "tonal-plasma-512713-h4";
+const cloud = (page: string) => `https://console.cloud.google.com/${page}?project=${GOOGLE_PROJECT}`;
+
 function Setup({ redirectUri, onSaved }: { redirectUri: string; onSaved: () => Promise<void> }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex flex-col gap-4 text-sm">
-      <p className="text-zinc-600 dark:text-zinc-400">Google needs to know about your site once before it will show its sign-in screen. In Google Cloud, signed in as yourself:</p>
+      <p className="text-zinc-600 dark:text-zinc-400">Google needs to know about your site once before it will show its sign-in screen. These links open your Google Cloud project named Maverick ({GOOGLE_PROJECT}), not Maverick Life OS:</p>
       <ol className="list-decimal space-y-2 pl-5">
         <li>
-          <a className="text-brand underline" href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noreferrer">
-            Create a project
-          </a>{" "}
-          named Maverick.
-        </li>
-        <li>
-          <a className="text-brand underline" href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" target="_blank" rel="noreferrer">
+          <a className="text-brand underline" href={cloud("apis/library/gmail.googleapis.com")} target="_blank" rel="noreferrer">
             Turn on the Gmail API
           </a>
           .
         </li>
         <li>
-          <a className="text-brand underline" href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noreferrer">
+          <a className="text-brand underline" href={cloud("auth/overview")} target="_blank" rel="noreferrer">
             Set up the sign-in screen
           </a>
           : app name Maverick, audience External, and under Audience add your Gmail address as a test user.
         </li>
         <li>
-          <a className="text-brand underline" href="https://console.cloud.google.com/auth/clients/create" target="_blank" rel="noreferrer">
+          <a className="text-brand underline" href={cloud("auth/clients/create")} target="_blank" rel="noreferrer">
             Create a client
           </a>
           : type Web application, and add this as the authorized redirect URI:
