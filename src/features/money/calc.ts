@@ -138,6 +138,8 @@ export function billDatesBetween(bill: Bill, start: string, end: string) {
     if (d >= start) dates.push({ date: d, paid: false });
     d = stepDue(bill, d, 1);
   }
+  // An email establishes an expected obligation, never a history of paid occurrences.
+  if (bill.emailSource?.created) return dates;
   d = stepDue(bill, bill.nextDue, -1);
   while (d && d >= start && dates.length < 120) {
     if (d <= end) dates.push({ date: d, paid: true });

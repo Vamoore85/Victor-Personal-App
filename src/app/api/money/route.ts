@@ -127,14 +127,15 @@ export async function PUT(req: Request) {
   try {
     // A save only lands on the latest copy (rev check), which the clean-up rules already ran on.
     // Older app code didn't carry that marker; keep it, or the rules would run again on the next load.
-    const data = body.data as { accountRules?: unknown; billImports?: unknown; siteImports?: unknown; siteCostRules?: unknown };
+    const data = body.data as { accountRules?: unknown; billImports?: unknown; emailBillImports?: unknown; siteImports?: unknown; siteCostRules?: unknown };
     if (typeof data.accountRules !== "number") data.accountRules = ACCOUNT_RULES;
     if (typeof data.siteCostRules !== "number") data.siteCostRules = SITE_COST_RULES;
     // Same for the workbook bills and websites already added: keep the lists, or deleted ones would come back.
-    if (!Array.isArray(data.billImports) || !Array.isArray(data.siteImports)) {
-      const current = (await readDoc(KEY))?.data as { billImports?: unknown; siteImports?: unknown } | undefined;
+    if (!Array.isArray(data.billImports) || !Array.isArray(data.siteImports) || !Array.isArray(data.emailBillImports)) {
+      const current = (await readDoc(KEY))?.data as { billImports?: unknown; siteImports?: unknown; emailBillImports?: unknown } | undefined;
       if (!Array.isArray(data.billImports) && Array.isArray(current?.billImports)) data.billImports = current.billImports;
       if (!Array.isArray(data.siteImports) && Array.isArray(current?.siteImports)) data.siteImports = current.siteImports;
+      if (!Array.isArray(data.emailBillImports) && Array.isArray(current?.emailBillImports)) data.emailBillImports = current.emailBillImports;
     }
     const result = await writeDoc(KEY, body.rev, body.data);
     if (!result.ok) return Response.json({ conflict: true, rev: result.current.rev, data: result.current.data }, { status: 409 });

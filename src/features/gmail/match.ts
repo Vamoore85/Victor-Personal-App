@@ -45,9 +45,11 @@ export function suggestScope(item: EmailItem, sites: Institution[], bills: Bill[
 
 /** The saved bill in that company this email is for, when exactly one fits. */
 export function suggestBill(item: EmailItem, scope: Scope, bills: Bill[]): Bill | null {
-  const same = bills.filter((b) => scopeOf(b) === scope && fits(item, b.name, [b.url]));
+  const same = matchingBills(item, scope, bills);
   return same.length === 1 ? same[0] : null;
 }
+
+export const matchingBills = (item: EmailItem, scope: Scope, bills: Bill[]) => bills.filter(b => scopeOf(b) === scope && fits(item, b.name, [b.url]));
 
 /**
  * A link that opens the message in Gmail, in the right account. Gmail's web

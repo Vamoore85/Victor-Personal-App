@@ -1,4 +1,5 @@
-import type { Scope } from "@/features/money/types";
+import type { BillFrequency, Scope } from "@/features/money/types";
+import { explicitCadence } from "./recurring";
 
 /*
  * Turns one Gmail message into a bill or receipt, or into nothing. Only
@@ -32,6 +33,7 @@ export type EmailItem = {
   duplicateOf?: string;
   scope?: Scope; // the company you assigned
   billId?: string; // the saved bill it was added as or linked to
+  recurringFrequency?: BillFrequency; // only when the bill explicitly states its cadence
   foundAt: string;
 };
 
@@ -119,7 +121,7 @@ const HOLD = /\b(pending (authori[sz]ation|charge|transaction|payment authori[sz
 const NOTICE = /(\bterms (of (service|use)|and conditions)|\bprivacy (policy|notice|statement)|\bpolicy (update|change)|\bservice (update|notice|notification|alert|announcement|change)|\baccount (update|notice|notification|alert|activity|settings|information)|\bimportant (information|update|notice|changes)|\bchanges? to (your|our)\b|\bmaintenance\b|\boutage\b|\bwelcome to\b|\bconfirm your (email|account|identity)|\bnew device\b|\bupdate your (payment|card|billing) (method|info|information|details)|\bpayment method (updated|added|expir)|\bcard (is )?expiring|\bwe('re| are) (updating|changing))/i;
 
 /** Bumped when the rules below change, so items found earlier get checked again. */
-export const RULES = 2;
+export const RULES = 3;
 
 export function kindOf(subject: string, text: string): EmailKind | null {
   const head = `${subject}\n${text.slice(0, 3000)}`;
@@ -262,6 +264,7 @@ export function extract(msg: RawMessage, foundAt: string): EmailItem | null {
     ...(messageId ? { messageId } : {}),
     rules: RULES,
     kind,
+    ...(kind === "bill" && explicitCadence(body) ? { recurringFrequency: explicitCadence(body)! } : {}),
     merchant,
     fromDomain: domain,
     subject,
