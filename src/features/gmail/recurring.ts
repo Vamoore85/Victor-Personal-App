@@ -11,6 +11,7 @@ export type EmailRecurringBill = {
 
 const day = (s: string) => Date.parse(`${s}T00:00:00Z`) / 86400000;
 const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+const vendor = (s: string) => clean(s.replace(/\b(notifications?|billing|statements?|credit card)\b/gi,""));
 const gateway = /^(paypal|stripe|squareup|square|intuit)\.com$/;
 
 /** Require a billing statement of cadence, or at least three distinct, regularly spaced bills. */
@@ -54,10 +55,16 @@ export function recurringEmailBills(items: EmailItem[], data: MoneyData, today: 
     const minimumGap: Record<BillFrequency, number> = { once:0,weekly:5,biweekly:12,monthly:25,quarterly:80,yearly:330 };
     const overlapping = billingDates.slice(1).some((d,n) => day(d) - day(billingDates[n]) < minimumGap[repeat.frequency]);
     const scopes = [...new Set(group.map(i => i.scope).filter((s): s is Scope => Boolean(s)))];
-    const scope = scopes.length === 1 ? scopes[0] : scopes.length > 1 ? null : suggestScope(latest, data.institutions, data.bills).scope;
+    const bankOwnerScopes = [...new Set(data.recurring.filter(f => f.direction === "out" && vendor(f.merchant) === vendor(latest.merchant) && f.accountIds.length > 0 && f.accountIds.every(id => {
+      const account = data.accounts.find(a=>a.id === id);
+      return account && !account.needsEntity && (account.scope ?? "personal") === f.scope;
+    })).map(f=>f.scope))];
+    const hint = suggestScope(latest, data.institutions, data.bills).scope;
+    const possibleScopes = [...new Set([...(hint ? [hint] : []),...bankOwnerScopes])];
+    const scope = scopes.length === 1 ? scopes[0] : scopes.length > 1 ? null : possibleScopes.length === 1 ? possibleScopes[0] : null;
     const same = scope === null ? [] : matchingBills(latest, scope, data.bills);
     const matches = data.bills.filter(b => b.emailSource?.key === key || group.some(i => i.billId === b.id) || same.includes(b) || (scope !== null && (b.scope ?? "personal") === scope && clean(b.name) === clean(latest.merchant)));
-    const bankMatches = data.recurring.filter(f => f.direction === "out" && f.scope === scope && clean(f.merchant) === clean(latest.merchant));
+    const bankMatches = data.recurring.filter(f => f.direction === "out" && f.scope === scope && vendor(f.merchant) === vendor(latest.merchant));
     const editedFinding = !matches.length && bankMatches.some(f => f.overrides && Object.keys(f.overrides).length > 0);
     const exact = matches.length === 1 && scopes.length <= 1 && !overlapping ? matches[0] : undefined;
     const validAmount = latest.currency === "USD" && latest.amount !== null && latest.amount > 0 && (!latest.flags.length || latest.status === "confirmed");
@@ -90,7 +97,7 @@ export function applyRecurringEmails(data: MoneyData, items: EmailItem[], today:
       const bill: Bill = { id: `email:${candidate.key}`, name: candidate.name, amount: candidate.latest.amount, category: "Bills", frequency: candidate.frequency, nextDue: candidate.latest.dueDate, dueDay: Number(candidate.latest.dueDate.slice(8,10)), accountId: "", autopay: false, scope: candidate.scope, emailSource: { key: candidate.key, ids: [...candidate.emailIds].sort(), evidence: candidate.evidence, created: true }, note: "Recurring bill found in email. Due date and amount are expected; payment is verified separately from bank activity." };
       if (candidate.findingId) {
         bill.recurringId = candidate.findingId;
-        recurring = recurring.map(f => f.id === candidate.findingId ? { ...f, status: "confirmed", billId: bill.id, overrides: { amount:bill.amount, nextDate:bill.nextDue, cadence:bill.frequency === "once" ? "irregular" : bill.frequency } } : f);
+        recurring = recurring.map(f => f.id === candidate.findingId ? { ...f, status: "confirmed", billId: bill.id } : f);
       }
       bills = [...bills, bill]; imported.add(candidate.key); added++;
     }
