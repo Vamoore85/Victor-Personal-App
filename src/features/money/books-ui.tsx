@@ -69,14 +69,20 @@ export function Books({
     URL.revokeObjectURL(url);
   }
 
+  if (company === QUICKBOOKS_COMPANY) {
+    return <div className="flex flex-col gap-5">
+      <CompanyPicker company={company} onChange={setCompany} />
+      <div className="flex items-end gap-3"><Field label="QuickBooks year"><select className={inputClass} value={year} onChange={e => setYear(Number(e.target.value))}>{[thisYear, thisYear - 1, thisYear - 2].map(y => <option key={y} value={y}>{y}</option>)}</select></Field><p className="pb-2 text-sm text-zinc-500">Gladiator’s accounting source of truth</p></div>
+      <QuickBooksPanel year={year} notice={quickBooksNotice} />
+      <details className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800"><summary className="cursor-pointer font-medium">Imported statements for reconciliation</summary><p className="my-3 text-sm text-zinc-500">Bank imports remain available for matching and review. The Gladiator books above come from QuickBooks.</p><StatementImport data={data} scope={company} /><AddBusinessAccount company={company} /></details>
+    </div>;
+  }
   if (!hasBusinessAccounts) {
     return (
       <div className="flex flex-col gap-6">
         <CompanyPicker company={company} onChange={setCompany} />
-        {company === QUICKBOOKS_COMPANY && <QuickBooksPanel year={thisYear} notice={quickBooksNotice} />}
         <Card title={`${name} books`}>
           <Empty>
-            {company === QUICKBOOKS_COMPANY && "Optional when QuickBooks is connected. "}
             Start by adding {name}&apos;s bank or card account below. Then import its statement, and the transactions show up here as profit
             and loss, sorted by {taxFormLabel(form)} line.
           </Empty>
@@ -89,7 +95,6 @@ export function Books({
   return (
     <div className="flex flex-col gap-6">
       <CompanyPicker company={company} onChange={setCompany} />
-      {company === QUICKBOOKS_COMPANY && <QuickBooksPanel year={year} notice={quickBooksNotice} />}
       <StatementImport data={data} scope={company} />
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Year">

@@ -22,6 +22,10 @@ type Report = {
   pl: ReportLine[];
   balanceSheet: ReportLine[];
   balanceAsOf: string;
+  source?: "gladiator-crm";
+  accounts?: { id: string; name: string; type: string; currency: string; balance: number | null }[];
+  transactions?: { columns: { title: string; type: string }[]; rows: string[][]; currency: string };
+  period?: { start: string; end: string };
 };
 type Status = {
   database: boolean;
@@ -34,6 +38,7 @@ type Status = {
   refreshExpires: string | null;
   redirectUri: string;
   report: Report | null;
+  shared?: boolean;
 };
 
 const STALE_MS = 4 * 60 * 60 * 1000;
@@ -126,7 +131,7 @@ export function QuickBooksPanel({ year, notice }: { year: number; notice?: strin
   }, [year, refresh]);
 
   async function disconnect() {
-    if (!window.confirm("Disconnect QuickBooks? The numbers already pulled stay here.")) return;
+    if (!window.confirm(status?.shared ? "Remove Gladiator books from Maverick? The connection in Gladiator CRM stays active." : "Disconnect QuickBooks? The numbers already pulled stay here.")) return;
     setBusy(true);
     try {
       await call("disconnect", {});
@@ -164,9 +169,10 @@ export function QuickBooksPanel({ year, notice }: { year: number; notice?: strin
 
   if (!status.keys) {
     return (
-      <Card title="Connect QuickBooks">
+      <Card title="Connect Gladiator books">
         {header}
-        <KeysForm redirectUri={status.redirectUri} onSaved={load} />
+        <GladiatorLinkForm onSaved={load} />
+        <details className="mt-5 text-sm"><summary className="cursor-pointer">Separate Intuit connection</summary><div className="mt-4"><KeysForm redirectUri={status.redirectUri} onSaved={load} /></div></details>
       </Card>
     );
   }
@@ -200,7 +206,7 @@ export function QuickBooksPanel({ year, notice }: { year: number; notice?: strin
               {busy ? "Updating…" : "Update now"}
             </button>
             <button className={ghostButtonClass} onClick={disconnect} disabled={busy}>
-              Disconnect
+              {status.shared ? "Remove this link" : "Disconnect"}
             </button>
           </div>
         }
@@ -213,23 +219,71 @@ export function QuickBooksPanel({ year, notice }: { year: number; notice?: strin
               <Stat label={`Expenses ${year}`} value={money(report.expenses)} />
               <Stat label="Net income" value={money(report.netIncome)} tone={report.netIncome >= 0 ? "good" : "bad"} />
             </div>
-            <p className="mt-3 text-xs text-zinc-500">
+            <p className="mt-3 text-sm text-zinc-500">
               {report.basis} basis, January 1 to {report.balanceAsOf || "today"}. Updated {new Date(report.fetchedAt).toLocaleString()}. These are
-              your bookkeeper&apos;s numbers, so they&apos;re the ones to trust for Gladiator&apos;s taxes.
+              Gladiator&apos;s QuickBooks records{status.shared ? ", shared with Gladiator CRM" : ""}.
             </p>
           </>
         ) : (
           <p className="text-sm text-zinc-500">{busy ? `Pulling ${year} from QuickBooks…` : `Press Update now to pull ${year}.`}</p>
         )}
       </Card>
+      {report?.year === year && report.accounts && report.transactions && <GladiatorLedger report={report} />}
       {report && report.year === year && (
-        <div className="grid grid-cols-1 gap-4 lg:gap-5 lg:grid-cols-2">
+        <details className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800"><summary className="cursor-pointer font-medium">Financial reports from QuickBooks</summary><div className="mt-4 grid grid-cols-1 gap-4 lg:gap-5 lg:grid-cols-2">
           <ReportTable title={`Profit and loss ${year}`} lines={report.pl} />
           <ReportTable title={`Balance sheet as of ${report.balanceAsOf}`} lines={report.balanceSheet} />
-        </div>
+        </div></details>
       )}
     </div>
   );
+}
+
+function GladiatorLinkForm({ onSaved }: { onSaved: () => void }) {
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function submit(e: FormEvent) {
+    e.preventDefault();setBusy(true);setError("");
+    try { await call("gladiator-link", { key });setKey("");onSaved(); }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  return <form onSubmit={submit} className="grid gap-4">
+    <p>Use the same Gladiator QuickBooks books that Jeremy sees. Balances, transactions, and expense categories stay together.</p>
+    <Field label="Gladiator connection code"><input className={inputClass} type="password" autoComplete="off" value={key} onChange={e => setKey(e.target.value)} /></Field>
+    {error && <p role="alert" className="text-rose-600">{error}</p>}
+    <button className={buttonClass} disabled={busy || !key}>{busy ? "Connecting…" : "Connect Gladiator books"}</button>
+  </form>;
+}
+
+function GladiatorLedger({ report }: { report: Report }) {
+  const [query, setQuery] = useState("");
+  const [account, setAccount] = useState("");
+  const [page, setPage] = useState(0);
+  const accounts = report.accounts ?? [], transactions = report.transactions;
+  if (!transactions) return null;
+  const accountIndex = transactions.columns.findIndex(c => c.title.toLowerCase() === "account");
+  const columns = transactions.columns.map((c, index) => ({ ...c, index })).filter(c => !["posting", "num"].includes(c.title.toLowerCase()));
+  const rows = transactions.rows.filter(r => (!account || r[accountIndex] === account) && (!query || r.join(" ").toLowerCase().includes(query.toLowerCase())));
+  const currentPage = Math.min(page, Math.max(0, Math.ceil(rows.length / 50) - 1)), start = currentPage * 50;
+  const bankAccounts = accounts.filter(a => ["Bank", "Credit Card", "CreditCard"].includes(a.type));
+  return <>
+    <Card title="Gladiator account balances">
+      <p className="mb-3 text-sm text-zinc-500">Current QuickBooks book balances. Bank-available balances and unreviewed bank-feed items may differ.</p>
+      <div className="divide-y divide-zinc-200 dark:divide-zinc-800">{bankAccounts.map(a => <div key={a.id} className="flex justify-between gap-4 py-2"><span>{a.name}</span><strong className="tabular-nums">{a.balance === null ? "Not recorded" : a.balance.toLocaleString("en-US", { style: "currency", currency: a.currency })}</strong></div>)}</div>
+    </Card>
+    <Card title="Gladiator transactions">
+      <p className="mb-3 text-sm text-zinc-500">{report.period?.start} to {report.period?.end} · Categories and amounts from QuickBooks.</p>
+      <div className="mb-4 grid gap-3 sm:grid-cols-2">
+        <Field label="Find a transaction"><input className={inputClass} type="search" placeholder="Name, category, amount…" value={query} onChange={e => { setQuery(e.target.value);setPage(0); }} /></Field>
+        <Field label="Account"><select className={inputClass} value={account} onChange={e => { setAccount(e.target.value);setPage(0); }}><option value="">All accounts</option>{accounts.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}</select></Field>
+      </div>
+      <div className="overflow-x-auto"><table className="w-full text-left text-base"><thead><tr>{columns.map(c => <th key={c.index} scope="col" className="whitespace-nowrap border-b border-zinc-300 px-3 py-2 dark:border-zinc-700">{c.title === "Split" ? "Category / other account" : c.title}</th>)}</tr></thead><tbody>{rows.slice(start, start + 50).map((r, i) => <tr key={start + i} className="border-b border-zinc-100 dark:border-zinc-900">{columns.map(c => <td key={c.index} className="min-w-28 max-w-80 px-3 py-2 align-top break-words">{r[c.index] || "—"}</td>)}</tr>)}</tbody></table></div>
+      {!rows.length && <p className="py-4 text-zinc-500">{query || account ? "No matching transactions." : "QuickBooks returned no transactions for this period."}</p>}
+      <div className="mt-4 flex items-center justify-between gap-3"><button className={ghostButtonClass} disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><span className="text-sm">{rows.length ? `${start + 1}–${Math.min(start + 50, rows.length)} of ${rows.length}` : "0 transactions"}</span><button className={ghostButtonClass} disabled={start + 50 >= rows.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
+    </Card>
+  </>;
 }
 
 function ReportTable({ title, lines }: { title: string; lines: ReportLine[] }) {
