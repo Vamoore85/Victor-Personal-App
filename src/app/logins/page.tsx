@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: "Logins" };
 export default function LoginsRoute() {
   return (
     <div>
-      <PageHeader title="Logins" subtitle="Every login by company. Passwords show only after you unlock your Maverick Vault." />
+      <PageHeader title="Logins" subtitle="Every website and account you sign in to, in one place. Usernames and passwords show after you unlock your vault." />
       <LoginsOverview />
     </div>
   );
