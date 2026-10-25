@@ -6,7 +6,7 @@ import { normalizeUrl } from "./calc";
 import { PasteLogins } from "./logins-paste-ui";
 import { ENTITIES } from "./outlook";
 import { scopeOf, ScopeField } from "./scope";
-import { newId, setMoneyData, useMoneyData } from "./store";
+import { cloudErrorMessage, cloudReady, newId, retryCloud, setMoneyData, useCloudState, useMoneyData } from "./store";
 import type { Institution, MoneyData, Scope } from "./types";
 import { Field, inputClass } from "./ui";
 import { useVault, type VaultEntry } from "./vault";
@@ -65,6 +65,9 @@ export function LoginsOverview() {
 
 function Portal({ data }: { data: MoneyData }) {
   const vault = useVault();
+  const cloud = useCloudState();
+  // This browser's copy shows at once; the saved directory arrives from the database a moment later.
+  const state = cloud === "off" || cloudReady() ? "ready" : cloud === "error" ? "failed" : "loading";
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [openId, setOpenId] = useState<string | null>(null);
@@ -138,12 +141,21 @@ function Portal({ data }: { data: MoneyData }) {
 
       {(unlocking || unlocked) && <VaultBar />}
 
+      {state === "failed" && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-800 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">
+          <span>Couldn&apos;t load your saved websites{cloudErrorMessage() ? `: ${cloudErrorMessage()}` : "."} What&apos;s below is only this browser&apos;s copy.</span>
+          <button className={PLAIN_OUTLINE} onClick={retryCloud}>Try again</button>
+        </div>
+      )}
+
       <p className="text-sm text-zinc-500">
-        {shown.length} of {sites.length} website{sites.length === 1 ? "" : "s"}
-        {noLink > 0 && ` · ${noLink} with no link saved`}
+        {state === "loading" ? "Loading your saved websites…" : `${shown.length} of ${sites.length} website${sites.length === 1 ? "" : "s"}`}
+        {state !== "loading" && noLink > 0 && ` · ${noLink} with no link saved`}
       </p>
 
-      {sites.length === 0 ? (
+      {sites.length === 0 && state === "loading" ? (
+        <p className="rounded-2xl border border-zinc-200 bg-surface p-6 text-center text-sm text-zinc-500 dark:border-zinc-800">Loading…</p>
+      ) : sites.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700">
           No websites saved yet. Press Add login to add one.
         </p>
