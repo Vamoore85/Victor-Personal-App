@@ -129,6 +129,18 @@ export const isCardPayment = (t: Transaction) => t.category === "Debt payments" 
 /** Bump when the rules below change, so saved scans are redone. */
 export const SCAN_RULES = 9;
 
+/** A scan must use the loaded document, rather than a cached browser copy. */
+export function needsBillScan(d: MoneyData | null, ready: boolean, today = todayYmd()) {
+  if (!ready || !d?.transactions.length) return false;
+  const start = addDays(today, -SCAN_DAYS);
+  const count = d.transactions.filter(t => t.date >= start && t.date <= today).length;
+  if (!count) return false;
+  const scan = d.billScan;
+  const lastSync = d.bankLinks.map(l => l.lastSync ?? "").sort().at(-1) ?? "";
+  if (!scan || scan.rules !== SCAN_RULES || scan.windowStart !== start || scan.windowEnd !== today || scan.ranAt < lastSync) return true;
+  return scan.scanned !== count;
+}
+
 export function isCandidate(t: Transaction, direction: "out" | "in") {
   if (direction === "out" && t.kind === "expense" && t.amount > 0 && t.transferId !== "imported" && isCardPayment(t) && !/\b(REFUND|REVERSAL|RETURN)\b/i.test(t.description)) return true;
   if (direction === "out" && t.kind === "expense" && t.amount > 0 && t.transferId !== "imported" && !NOT_OUTGOING.test(t.description)) {

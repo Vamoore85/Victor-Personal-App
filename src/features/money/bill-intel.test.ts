@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { detectRecurring, groupKey, isCandidate } from "./bill-intel";
+import { applyScan, detectRecurring, groupKey, isCandidate, needsBillScan } from "./bill-intel";
 import { EMPTY_DATA, type Account, type MoneyData, type Transaction } from "./types";
 
 /*
@@ -19,6 +19,22 @@ function data(transactions: Transaction[]): MoneyData {
   return { ...EMPTY_DATA, accounts: [acct("1111", "personal"), acct("2222", "business")], transactions };
 }
 const find = (d: MoneyData, name: RegExp) => detectRecurring(d, TODAY).found.find((f) => name.test(f.merchant));
+
+test("bill scans wait for loaded data and reevaluate the actual saved scan after a reload or conflict", () => {
+  const d = data([t("1111", "2026-10-02", 1900, "CHECK 0201")]);
+  assert.equal(needsBillScan(d, false, TODAY), false);
+  assert.equal(needsBillScan(data([t("1111", "2020-01-01", 10, "Old purchase")]), true, TODAY), false);
+  assert.equal(needsBillScan(d, true, TODAY), true);
+  const { found, scan } = detectRecurring(d, TODAY);
+  const saved = applyScan(d, found, scan, () => "synthetic-finding", TODAY);
+  assert.equal(needsBillScan(saved, true, TODAY), false);
+  const olderCloud = { ...saved, billScan: { ...scan, rules: 8 } };
+  assert.equal(needsBillScan(olderCloud, true, TODAY), true);
+  const repaired = applyScan(olderCloud, found, scan, () => "synthetic-finding", TODAY);
+  assert.equal(needsBillScan(repaired, true, TODAY), false);
+  assert.equal(needsBillScan({ ...repaired, billScan: undefined }, true, TODAY), true);
+  assert.equal(needsBillScan({ ...repaired, transactions: [...repaired.transactions, t("1111", "2026-10-03", 10, "Example purchase")] }, true, TODAY), true);
+});
 
 test("checks, child support, BG&E, Verizon and card payments are found as bills", () => {
   const d = data([

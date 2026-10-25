@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { applyScan, detectRecurring, SCAN_RULES } from "./bill-intel";
+import { applyScan, detectRecurring, needsBillScan } from "./bill-intel";
 import { addDays, money, today } from "./calc";
 import { ago } from "./intel-shared";
 import { CONFIDENCE_LABEL, ENTITIES, balances, type AccountLine, cadenceWord, entityLabel, total, transactionRows, upcoming, type Confidence, type EntityBalance, type TxnRow, type UpcomingLine } from "./outlook";
 import { addAccountsToBank, connectBank, loadPlaidScript, syncAll, useSyncActivity, type LinkStep } from "./plaid";
 import { freshness } from "./briefing";
-import { getMoneyData, newId, setMoneyData } from "./store";
+import { cloudReady, getMoneyData, newId, setMoneyData, useCloudState } from "./store";
 import type { Account, MoneyData, Scope } from "./types";
 import { accountLabel, assignEntity } from "./accounts-fix";
 
@@ -18,23 +18,18 @@ import { accountLabel, assignEntity } from "./accounts-fix";
  * below to it; that's the only filter, and it's optional.
  */
 
-let scannedFor = "";
-
 /** Finds recurring bills again whenever the banks have synced since the last look. */
 export function useBillScan(d: MoneyData | null) {
-  const lastSync = d?.bankLinks.map((l) => l.lastSync ?? "").sort().at(-1) ?? "";
-  const ranAt = d?.billScan?.rules === SCAN_RULES ? (d?.billScan?.ranAt ?? "") : "";
-  const count = d?.transactions.length ?? 0;
+  const cloud = useCloudState();
   useEffect(() => {
-    if (!count) return;
-    const key = `${lastSync}|${count}`;
-    if (scannedFor === key || (ranAt && ranAt >= lastSync && d?.billScan?.windowEnd === today())) return;
-    scannedFor = key;
+    const ready = cloud === "off" || cloudReady();
+    if (!needsBillScan(d, ready)) return;
     setMoneyData((x) => {
+      if (!needsBillScan(x, ready)) return x;
       const { found, scan } = detectRecurring(x);
       return scan.scanned === 0 ? x : applyScan(x, found, scan, newId);
     });
-  }, [lastSync, ranAt, count, d?.billScan?.windowEnd]);
+  }, [d, cloud]);
 }
 
 const TONE: Record<Confidence, string> = {
