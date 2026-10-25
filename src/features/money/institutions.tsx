@@ -6,6 +6,7 @@ import { INSTITUTION_TYPES, type Institution, type MoneyData, type Scope } from 
 import { ScopeBadge, ScopeField, useDefaultScope } from "./scope";
 import { accountBalance, accountTypeLabel, isLiability, money, normalizeUrl, shortDate } from "./calc";
 import { InstitutionLogins, VaultBar } from "./vault-ui";
+import { PasteLogins } from "./logins-paste-ui";
 import { Card, Empty, Field, buttonClass, ghostButtonClass, inputClass } from "./ui";
 
 type Draft = Omit<Institution, "id">;
@@ -137,6 +138,8 @@ export function Institutions({ data }: { data: MoneyData }) {
   return (
     <div className="flex flex-col gap-4 lg:gap-5">
       <VaultBar />
+
+      <PasteLogins data={data} />
 
       <Card title={editingId ? "Edit institution" : "Add an institution"}>
         <form onSubmit={save} className="grid gap-3 sm:grid-cols-3 sm:items-end">

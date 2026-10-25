@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: "Accounts" };
 export default function AccountsRoute() {
   return (
     <div>
-      <PageHeader title="Accounts" subtitle="Every account by company: what's in it, what's owed, and whether it's live from the bank." />
+      <PageHeader title="Accounts" subtitle="Every account, bill and login by company, and what each one leaves you with." />
       <AccountsOverview />
     </div>
   );
