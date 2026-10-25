@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { databaseUrl, dbConfigured, readDoc, writeDoc } from "@/lib/db";
 import { applyPendingBills } from "@/lib/pending-bills";
 import { applyPendingImport } from "@/lib/pending-import";
+import { applyPendingSites } from "@/lib/pending-sites";
 import { accountDiag, asMoney, billDiag } from "@/lib/money-doc";
 import { ACCOUNT_RULES, cleanAccounts } from "@/features/money/accounts-fix";
 import { sameOrigin, signedIn } from "@/lib/plaid-server";
@@ -77,6 +78,13 @@ export async function GET(req: Request) {
         if (saved.ok) doc = { rev: saved.rev, data: bills.data };
         console.log(`money bills import: added=${bills.added}, saved=${saved.ok}`);
       }
+      // Websites waiting in PENDING_SITES (names and links only).
+      const sites = applyPendingSites(doc.data);
+      if (sites) {
+        const saved = await writeDoc(KEY, doc.rev, sites.data);
+        if (saved.ok) doc = { rev: saved.rev, data: sites.data };
+        console.log(`money sites import: added=${sites.added}, noLink=${sites.noLink}, saved=${saved.ok}`);
+      }
       console.log(`money accounts: ${accountDiag(doc.data)}`);
       for (const line of billDiag(doc.data).split("\n")) console.log(`money bills check: ${line}`);
     }
@@ -105,13 +113,13 @@ export async function PUT(req: Request) {
   try {
     // A save only lands on the latest copy (rev check), which the clean-up rules already ran on.
     // Older app code didn't carry that marker; keep it, or the rules would run again on the next load.
-    const data = body.data as { accountRules?: unknown; billImports?: unknown };
+    const data = body.data as { accountRules?: unknown; billImports?: unknown; siteImports?: unknown };
     if (typeof data.accountRules !== "number") data.accountRules = ACCOUNT_RULES;
-    // Same for the workbook bills already added: keep the list, or deleted ones would come back.
-    if (!Array.isArray(data.billImports)) {
-      const current = await readDoc(KEY);
-      const kept = (current?.data as { billImports?: unknown } | undefined)?.billImports;
-      if (Array.isArray(kept)) data.billImports = kept;
+    // Same for the workbook bills and websites already added: keep the lists, or deleted ones would come back.
+    if (!Array.isArray(data.billImports) || !Array.isArray(data.siteImports)) {
+      const current = (await readDoc(KEY))?.data as { billImports?: unknown; siteImports?: unknown } | undefined;
+      if (!Array.isArray(data.billImports) && Array.isArray(current?.billImports)) data.billImports = current.billImports;
+      if (!Array.isArray(data.siteImports) && Array.isArray(current?.siteImports)) data.siteImports = current.siteImports;
     }
     const result = await writeDoc(KEY, body.rev, body.data);
     if (!result.ok) return Response.json({ conflict: true, rev: result.current.rev, data: result.current.data }, { status: 409 });
