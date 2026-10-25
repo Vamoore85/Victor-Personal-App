@@ -18,6 +18,19 @@ export const ENTITIES: { id: Scope; label: string }[] = [
 
 export const entityLabel = (s: Scope | undefined) => ENTITIES.find((e) => e.id === (s ?? "personal"))!.label;
 export const entityOf = (a: Account | undefined): Scope => a?.scope ?? "personal";
+
+/** Reuse a unique saved obligation without changing its dates or the bank evidence. */
+function savedBillFor(d: MoneyData, f: RecurringFinding) {
+  const direct = d.bills.filter(b => b.id === f.billId || b.recurringId === f.id);
+  if (direct.length) return direct.length === 1 ? direct[0] : undefined;
+  if (f.accountIds.length !== 1 || Object.keys(f.overrides ?? {}).length) return undefined;
+  const e = effective(f);
+  const name = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+  const matches = d.bills.filter(b => !b.recurringId && b.accountId === f.accountIds[0] &&
+    (b.scope ?? "personal") === e.scope && name(b.name) === name(e.name) &&
+    b.frequency === e.cadence && Math.abs(b.amount - e.amount) < 0.01);
+  return matches.length === 1 ? matches[0] : undefined;
+}
 /** Accounts with no company yet count toward none of them. */
 const counts = (a: Account | undefined) => !!a && !a.needsEntity;
 
@@ -169,7 +182,7 @@ export function upcoming(d: MoneyData, days = 30, t = todayYmd()): UpcomingLine[
 
   for (const f of d.recurring) {
     if (f.accountIds.length && !f.accountIds.some((id) => counts(acct.get(id)))) continue;
-    if (f.direction !== "out" || f.status === "dismissed" || billsFromFindings.has(f.id) || (f.billId && d.bills.some((b) => b.id === f.billId))) continue;
+    if (f.direction !== "out" || f.status === "dismissed" || billsFromFindings.has(f.id) || savedBillFor(d, f)) continue;
     const e = effective(f);
     let date = e.nextDate;
     const a = acct.get(f.accountIds[0] ?? "");
@@ -226,13 +239,12 @@ export type RecurringRow = {
  */
 export function recurringRows(d: MoneyData): RecurringRow[] {
   const acct = new Map(d.accounts.map((a) => [a.id, accountLabel(a)]));
-  const bills = new Map(d.bills.map(b => [b.id,b]));
   const assigned = new Set(d.accounts.filter(counts).map((a) => a.id));
   return d.recurring
     .filter((f) => f.direction === "out" && f.status !== "dismissed" && f.occurrences.length > 0 && (!f.accountIds.length || f.accountIds.some((id) => assigned.has(id))))
     .map((f) => {
       const e = effective(f);
-      const bill = f.billId ? bills.get(f.billId) : undefined;
+      const bill = savedBillFor(d, f);
       const last = [...f.occurrences].sort((a, b) => b.date.localeCompare(a.date))[0];
       const bankSeen = f.occurrences.filter((o) => o.source === "bank").length;
       const steady = f.max - f.min <= Math.max(1, f.typical * 0.1);
