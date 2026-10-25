@@ -68,7 +68,7 @@ export function FinancialCenter() {
       return "all";
     }
   });
-  const [booksCompany, setBooksCompany] = useState<Company | null>(() => (readQuickBooksNotice() ? "gladiator" : null));
+  const [booksCompany, setBooksCompany] = useState<Company | null>(() => (readQuickBooksNotice() || (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("company") === "gladiator") ? "gladiator" : null));
   // Coming back from QuickBooks sign-in opens Gladiator's books with the result.
   const [quickBooksNotice] = useState(readQuickBooksNotice);
   const fileRef = useRef<HTMLInputElement>(null);

@@ -28,10 +28,18 @@ export type QboReport = {
   pl: ReportLine[];
   balanceSheet: ReportLine[];
   balanceAsOf: string;
+  source?: "gladiator-crm";
+  accounts?: { id: string; name: string; type: string; classification: string; currency: string; balance: number | null }[];
+  transactions?: { columns: { title: string; type: string }[]; rows: string[][]; currency: string };
+  period?: { start: string; end: string };
 };
 
 const KEYS_DOC = "qbo-keys";
 const CONNECTION_DOC = "qbo-connection";
+const GLADIATOR_LINK_DOC = "qbo-gladiator-read-link";
+const GLADIATOR_ENDPOINT = "https://msmfyftalseckinllvsd.supabase.co/functions/v1/quickbooks";
+type GladiatorLink = { key: string; company: string; linkedAt: string };
+type GladiatorSnapshot = { company: string; fetched_at: string; period: { start: string; end: string }; accounts: NonNullable<QboReport["accounts"]>; transactions: NonNullable<QboReport["transactions"]>; profit_and_loss: QReport; balance_sheet: QReport };
 const reportDoc = (year: number) => `qbo-report-${year}`;
 
 const AUTH_URL = "https://appcenter.intuit.com/connect/oauth2";
@@ -106,6 +114,31 @@ export async function getKeys(): Promise<QboKeys | null> {
 export async function saveKeys(keys: QboKeys) {
   needDb();
   await put(KEYS_DOC, { sealed: seal(keys), savedAt: new Date().toISOString() });
+}
+
+async function gladiatorLink(): Promise<GladiatorLink | null> {
+  if (!dbConfigured()) return null;
+  const doc = await readDoc(GLADIATOR_LINK_DOC);
+  const value = doc?.data as { sealed?: string } | null;
+  if (!value?.sealed) return null;
+  try { return unseal<GladiatorLink>(value.sealed); } catch { throw new QboError("The Gladiator books link needs to be connected again.", 409); }
+}
+
+async function callGladiator<T>(key: string, body: Record<string, unknown>): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(GLADIATOR_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json", "x-gladiator-books-key": key }, body: JSON.stringify(body), cache: "no-store", signal: AbortSignal.timeout(60_000) });
+  } catch { throw new QboError("Gladiator QuickBooks could not be reached. Try updating again.", 502); }
+  if (!response.ok) throw new QboError(response.status === 401 || response.status === 403 ? "The Gladiator books link needs to be connected again." : "Gladiator QuickBooks did not finish loading. Try updating again.", 502);
+  return response.json() as Promise<T>;
+}
+
+export async function saveGladiatorLink(key: string) {
+  needDb();
+  if (!/^[a-f0-9]{64}$/.test(key)) throw new QboError("Enter the Gladiator connection code.");
+  const s = await callGladiator<{ connected: boolean; company: string }>(key, { status: true });
+  if (!s.connected || s.company !== "Gladiator Solutions LLC") throw new QboError("This link is not connected to Gladiator’s QuickBooks company.", 409);
+  await put(GLADIATOR_LINK_DOC, { sealed: seal({ key, company: s.company, linkedAt: new Date().toISOString() } satisfies GladiatorLink) });
 }
 
 export const redirectUri = (origin: string) => `${origin}/api/quickbooks/callback`;
@@ -209,6 +242,7 @@ async function freshTokens(keys: QboKeys) {
 }
 
 export async function disconnect() {
+  if (await gladiatorLink()) { await put(GLADIATOR_LINK_DOC, {}); return; }
   const found = await readConnection();
   const keys = await getKeys();
   if (found && keys) {
@@ -226,6 +260,11 @@ export async function disconnect() {
 }
 
 export async function status() {
+  const link = await gladiatorLink();
+  if (link) {
+    const s = await callGladiator<{ connected: boolean; company: string }>(link.key, { status: true });
+    return { database: true, keys: true, keysFromSettings: false, env: "production" as QboEnv, connected: s.connected, companyName: s.company, connectedAt: link.linkedAt, refreshExpires: null, shared: true };
+  }
   const keys = await getKeys();
   const found = await readConnection();
   return {
@@ -242,7 +281,7 @@ export async function status() {
 
 export async function cachedReport(year: number): Promise<QboReport | null> {
   if (!dbConfigured()) return null;
-  const doc = await readDoc(reportDoc(year));
+  const doc = await readDoc(await gladiatorLink() ? `qbo-gladiator-report-${year}` : reportDoc(year));
   const r = doc?.data as QboReport | null;
   return r?.pl ? r : null;
 }
@@ -314,6 +353,14 @@ export function summarize(pl: QReport, bs: QReport, year: number, company: strin
 /** Pulls the year's profit and loss and the balance sheet, and keeps a copy. */
 export async function syncReport(year: number, todayIso: string): Promise<QboReport> {
   needDb();
+  const link = await gladiatorLink();
+  if (link) {
+    const snapshot = await callGladiator<GladiatorSnapshot>(link.key, { reports: { year } });
+    if (snapshot.company !== link.company || !snapshot.profit_and_loss?.Header || !snapshot.balance_sheet?.Header || !Array.isArray(snapshot.accounts) || !Array.isArray(snapshot.transactions?.rows)) throw new QboError("Gladiator QuickBooks returned incomplete books. Try updating again.", 502);
+    const report: QboReport = { ...summarize(snapshot.profit_and_loss, snapshot.balance_sheet, year, snapshot.company), source: "gladiator-crm", fetchedAt: snapshot.fetched_at, accounts: snapshot.accounts, transactions: snapshot.transactions, period: snapshot.period };
+    await put(`qbo-gladiator-report-${year}`, report);
+    return report;
+  }
   const keys = await getKeys();
   if (!keys) throw new QboError("Add the Intuit app keys first.");
   const tokens = await freshTokens(keys);
