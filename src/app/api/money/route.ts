@@ -6,7 +6,7 @@ import { applyPendingImport } from "@/lib/pending-import";
 import { applyPendingSites } from "@/lib/pending-sites";
 import { accountDiag, asMoney, billDiag } from "@/lib/money-doc";
 import { ACCOUNT_RULES, cleanAccounts } from "@/features/money/accounts-fix";
-import { linkSiteCosts, SITE_COST_RULES } from "@/features/money/site-costs";
+import { lastPayments, linkSiteCosts, SITE_COST_RULES } from "@/features/money/site-costs";
 import { sameOrigin, signedIn } from "@/lib/plaid-server";
 
 // Cloud copy of the Financial Center. The browser keeps a local copy too and
@@ -94,6 +94,12 @@ export async function GET(req: Request) {
         console.log(`money site costs: linked=${costs.linked}, saved=${saved.ok}`);
       }
       console.log(`money accounts: ${accountDiag(doc.data)}`);
+      // How many websites on Logins have a payment found, only a saved bill, or neither (counts only, never names or amounts).
+      const clean = cleanAccounts(asMoney(doc.data)).data;
+      const paid = lastPayments(clean);
+      const billed = new Set(clean.bills.map((b) => b.institutionId).filter(Boolean));
+      const saved = clean.institutions.filter((i) => !paid.has(i.id) && (billed.has(i.id) || i.cost?.kind === "manual")).length;
+      console.log(`money logins: sites=${clean.institutions.length} paymentFound=${paid.size} savedBillOnly=${saved} notRecorded=${clean.institutions.length - paid.size - saved} billsLinked=${billed.size}/${clean.bills.length}`);
       for (const line of billDiag(doc.data).split("\n")) console.log(`money bills check: ${line}`);
     }
     return packed({ configured: true, rev: doc?.rev ?? 0, data: doc?.data ?? null });
