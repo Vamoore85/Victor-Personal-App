@@ -1,4 +1,4 @@
-export const SCAN_BATCH_SIZE = 100;
+export const SCAN_BATCH_SIZE = 40;
 
 export type ScanCursor = {
   page?: string;
