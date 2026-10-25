@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { PageHeader } from "@/components/PageHeader";
-import { BrainDumpScreen } from "@/features/projects/BrainDump";
+import { BrainDumpScreen } from "@/features/projects/BrainDumpScreen";
 
 export const metadata: Metadata = { title: "Projects" };
 
