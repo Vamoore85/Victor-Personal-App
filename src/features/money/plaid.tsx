@@ -409,7 +409,7 @@ export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: 
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    setLocal(savedKeys());
+    void Promise.resolve().then(() => setLocal(savedKeys()));
     fetch("/api/plaid/status?check=1")
       .then((r) => r.json() as Promise<ServerKeys>)
       .then(setServer)
@@ -548,13 +548,14 @@ export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: 
   const check = server?.check;
   return (
     <Card title="Connected banks">
-      <SyncCheck />
+      <SyncCheck compact />
       <div className="mb-3 flex flex-wrap items-end gap-2">
-        <p className="text-xs text-zinc-500">New accounts start as &ldquo;Needs assignment&rdquo;; you pick each one&apos;s company above.</p>
         <button className={buttonClass} onClick={connect} disabled={!status?.configured || busy !== null}>
           {busy === "new" ? "Connecting…" : "Connect bank or card"}
         </button>
       </div>
+      <details open={notReady || editingKeys || check?.ok === false || undefined} className="mb-3 text-sm">
+        <summary className="mb-2 cursor-pointer text-zinc-500">Connection setup</summary>
       {server && (
         <p className="mb-3 text-xs" data-testid="plaid-status">
           {!status?.configured ? (
@@ -590,6 +591,7 @@ export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: 
           <span className="font-mono">pass_good</span>. The accounts and transactions are made up.
         </p>
       )}
+      </details>
       {message && <p className="mb-3 text-sm text-rose-600 dark:text-rose-400">{message}</p>}
       {waiting && <p className="mb-3 text-sm text-amber-700 dark:text-amber-400">{waiting}</p>}
       {briefingReady && onBriefing && (
@@ -662,7 +664,9 @@ export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: 
                     </>
                   )}
                 </p>
-                {accts.length > 0 && (
+                {accts.length > 0 ? (
+                  <details>
+                    <summary className="cursor-pointer text-sm text-zinc-500">{accts.length} account{accts.length === 1 ? "" : "s"} · balances and company settings</summary>
                   <ul className="flex flex-col gap-1.5">
                     {accts.map((a) => {
                       const ts = data.transactions.filter((t) => t.accountId === a.id && t.plaidId);
@@ -697,7 +701,8 @@ export function BankLinks({ data, onBriefing }: { data: MoneyData; onBriefing?: 
                       );
                     })}
                   </ul>
-                )}
+                  </details>
+                ) : <p className="text-xs text-zinc-500">No separately listed accounts on this connection.</p>}
               </li>
             );
           })}

@@ -13,7 +13,6 @@ import { Overview } from "./outlook-ui";
 import { AssignAccounts } from "./assign-ui";
 import { assignedOnly } from "./accounts-fix";
 import { RecurringBills } from "./recurring-ui";
-import { RecurringEmailBills } from "@/features/gmail/RecurringEmailBills";
 import { Bills } from "./bill-intel-ui";
 import { Spending } from "./spending-ui";
 import { Documents } from "./documents-ui";
@@ -132,10 +131,10 @@ export function FinancialCenter() {
 
   return (
     <ScopeContext.Provider value={scoped}>
-    <div className="flex flex-col gap-5 lg:gap-6">
+    <div className="flex min-w-0 flex-col gap-4 lg:gap-5">
       <VaultAutoLock />
       <nav className="flex flex-wrap items-center justify-between gap-3" aria-label="Money">
-        <div className="flex min-w-0 gap-0.5 overflow-x-auto rounded-full bg-zinc-200/60 p-1 [scrollbar-width:none] sm:gap-1 dark:bg-zinc-900">
+        <div className="flex max-w-full min-w-0 flex-wrap gap-0.5 rounded-2xl bg-zinc-200/60 p-1 sm:gap-1 dark:bg-zinc-900">
           {MAIN.map((t) => (
             <button
               key={t.id}
@@ -219,21 +218,27 @@ export function FinancialCenter() {
 
       {tab === "overview" && <Overview data={data} onSettings={() => setTab("accounts")} />}
       {tab === "spending" && <Spending data={assignedOnly(data)} goTo={setTab} initialEntity="all" />}
-      {tab === "bills" && <><RecurringEmailBills /><RecurringBills data={data} categories={categories} /></>}
+      {tab === "bills" && <RecurringBills data={data} categories={categories} />}
       {tab === "accounts" && (
         <>
-          <AssignAccounts data={data} />
-          <Link href="/integrations" className="self-start text-sm text-zinc-500 underline hover:text-brand">
-            All connections (banks, QuickBooks, Outlook, home apps) are on the Integrations page
-          </Link>
-          <BankLinks
-            data={data}
-            onBriefing={() => {
-              setMode("real");
-              setTab("bills");
-            }}
-          />
           <Accounts data={data} />
+          <details className="rounded-xl border border-zinc-200 bg-surface p-4 dark:border-zinc-800" open={data.accounts.some(a => a.needsEntity) || undefined}>
+            <summary className="cursor-pointer font-medium">Account assignments{data.accounts.some(a => a.needsEntity) ? " · action needed" : " · Personal, Maverick & Gladiator"}</summary>
+            <div className="mt-3"><AssignAccounts data={data} /></div>
+          </details>
+          <details className="rounded-xl border border-zinc-200 bg-surface p-4 dark:border-zinc-800" data-testid="manage-connections">
+            <summary className="cursor-pointer font-medium">Manage connections{data.bankLinks.some(l => l.error) ? " · needs attention" : ""}</summary>
+            <div className="mt-3">
+              <BankLinks
+                data={data}
+                onBriefing={() => {
+                  setMode("real");
+                  setTab("bills");
+                }}
+              />
+              <Link href="/integrations" className="mt-3 inline-block text-sm text-brand underline">Other app connections</Link>
+            </div>
+          </details>
         </>
       )}
       {tab === "briefing" && <BriefingView data={data} goTo={setTab} />}
