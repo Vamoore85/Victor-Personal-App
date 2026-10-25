@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { RecurringEmailBills } from "@/features/gmail/RecurringEmailBills";
 import {
   BUCKETS,
   CADENCES,
@@ -184,6 +185,8 @@ export function Bills({ data, categories, goTo, initialEntity }: { data: MoneyDa
       />
 
       {mode === "sample" ? <SampleBanner /> : !readiness.ready && <RealEmpty bills={data.bills.length} goTo={goTo} />}
+
+      {mode !== "sample" && <RecurringEmailBills />}
 
       {f.view === "upcoming" && <Briefing d={filtered} kind={ukind[f.upcoming]} buckets={buckets} onOpen={setOpen} onAccounts={() => setBills({ view: "accounts" })} />}
       {f.view === "recurring" && (

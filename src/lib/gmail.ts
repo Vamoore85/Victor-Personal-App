@@ -4,6 +4,8 @@ import { extract, mergeFound, RULES, type EmailItem, type EmailStatus, type RawM
 import type { Scope } from "@/features/money/types";
 import { SCAN_BATCH_SIZE, claimScan, collectScanBatch, scanKey, scanRange, type ScanCursor } from "@/features/gmail/scan-history";
 import { gmailFailure } from "@/features/gmail/api-errors";
+import { applyRecurringEmails, recurringEmailBills } from "@/features/gmail/recurring";
+import { asMoney, MONEY_DOC } from "@/lib/money-doc";
 
 /*
  * Read-only Gmail link that finds bills and receipts.
@@ -304,7 +306,7 @@ export async function scan(days: number, today: string, options: { year?: number
       const kept = d.items.map(item => {
         if (!again.has(item.id)) return item;
         const checked = again.get(item.id);
-        const updated: EmailItem = { ...item, rules: RULES, ...(checked?.messageId ? { messageId: checked.messageId } : {}) };
+        const updated: EmailItem = { ...item, rules: RULES, ...(checked?.messageId ? { messageId: checked.messageId } : {}), ...(checked?.recurringFrequency ? { recurringFrequency: checked.recurringFrequency } : {}) };
         if (!checked && item.status === "review" && !item.scope && !item.billId) {
           movedOut++;
           updated.status = "ignored";
@@ -330,6 +332,23 @@ export async function scan(days: number, today: string, options: { year?: number
 }
 
 /* ---- Your review ---- */
+
+/** Route email evidence into the existing Bills record using optimistic revisions. */
+export async function routeRecurringBills(today: string) {
+  needDb();
+  const { items } = await readItems();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const doc = await readDoc(MONEY_DOC);
+    const data = asMoney(doc?.data);
+    const result = applyRecurringEmails(data, items, today);
+    if (result.data !== data) {
+      const saved = await writeDoc(MONEY_DOC, doc?.rev ?? 0, result.data);
+      if (!saved.ok) continue;
+    }
+    return { added: result.added, linked: result.linked, groups: recurringEmailBills(items, result.data, today) };
+  }
+  throw new GmailError("Bills changed during this update. Open Bills to retry routing the email finds.", 409);
+}
 
 const SCOPES: Scope[] = ["personal", "business", "gladiator"];
 const STATUSES: EmailStatus[] = ["review", "confirmed", "ignored", "duplicate"];

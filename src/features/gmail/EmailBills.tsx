@@ -49,6 +49,10 @@ const NOTICES: Record<string, string> = {
   failed: "Google sign-in didn't finish. Try again.",
 };
 
+class GmailRequestError extends Error {
+  constructor(message: string, public status: number) { super(message); }
+}
+
 async function call<T>(path: string, body?: Record<string, unknown>): Promise<T> {
   const res = await fetch(`/api/gmail/${path}`, {
     method: body ? "POST" : "GET",
@@ -56,7 +60,7 @@ async function call<T>(path: string, body?: Record<string, unknown>): Promise<T>
     body: body ? JSON.stringify(body) : undefined,
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || "Couldn't reach Gmail.");
+  if (!res.ok) throw new GmailRequestError(json.error || "Couldn't reach Gmail.", res.status);
   return json as T;
 }
 
@@ -299,13 +303,30 @@ function Scan({ status, reload, onYearChange }: { status: Status; reload: () => 
     try {
       let more = true;
       let batches = 0;
+      let retries = 0;
       while (more && !paused.current && batches < 200) {
-        const result = await call<{ scan: ScanInfo }>("scan", { days: Number(period) || 90, ...(selectedYear ? { year: selectedYear } : {}), restart: restart && batches === 0 });
+        let result: { scan: ScanInfo; bills?: { added: number; linked: number }; billsError?: string };
+        try {
+          result = await call<typeof result>("scan", { days: Number(period) || 90, ...(selectedYear ? { year: selectedYear } : {}), restart: restart && batches === 0 && retries === 0 });
+        } catch (e) {
+          const temporary = e instanceof TypeError || e instanceof GmailRequestError && [409, 429, 502, 503, 504].includes(e.status);
+          if (!temporary || retries >= 6) throw e;
+          retries++;
+          setBatchNote("Connection interrupted. Saved progress will resume shortly…");
+          await new Promise(resolve => setTimeout(resolve, 30000));
+          continue;
+        }
         batches++;
-        setBatchNote(`${result.scan.totalLooked ?? result.scan.looked} emails examined in this period`);
+        setBatchNote(`${result.scan.totalLooked ?? result.scan.looked} emails examined in this period${result.bills?.added ? ` · ${result.bills.added} recurring bills added to Bills` : ""}`);
+        if (result.billsError) setError(result.billsError);
         await reload();
         more = result.scan.capped;
-        if (result.scan.failed) break; // show failed reads for a deliberate retry rather than spinning
+        if (result.scan.failed) {
+          if (retries >= 6) { setError("Some emails still couldn't be read. The rest are saved; Continue scan retries the remaining messages."); break; }
+          retries++;
+          setBatchNote(`${result.scan.totalLooked ?? result.scan.looked} emails examined. Waiting briefly before retrying unread messages…`);
+          await new Promise(resolve => setTimeout(resolve, 30000));
+        } else retries = 0;
       }
     } catch (e) {
       setError((e as Error).message);
@@ -455,7 +476,7 @@ function ItemRow({
     ...(item.kind === "bill" ? { dueDate: due || null } : { billDate: receiptDate || null }),
   });
 
-  const linked = item.billId ? data?.bills.find((b) => b.id === item.billId) : undefined;
+  const linked = data?.bills.find(b => b.id === item.billId || b.emailSource?.ids.includes(item.id));
   const match = item.status === "confirmed" && item.scope && !item.billId && data ? suggestBill(item, item.scope, data.bills) : null;
 
   function addAsBill() {
@@ -478,7 +499,7 @@ function ItemRow({
   }
 
   return (
-    <li className="flex flex-col gap-2 py-3" data-testid="gmail-item">
+    <li id={`email-${item.id}`} className="flex scroll-mt-16 flex-col gap-2 py-3" data-testid="gmail-item">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-medium">
@@ -517,6 +538,7 @@ function ItemRow({
         </div>
       </dl>
       {item.evidence && <p className="truncate text-xs text-zinc-500">“{item.evidence}”</p>}
+      {linked && item.status !== "confirmed" && <p className="text-sm text-emerald-700">In Bills: {linked.name} · email evidence linked</p>}
       {item.flags.length > 0 && item.status !== "confirmed" && (
         <ul className="list-disc pl-5 text-xs text-amber-700 dark:text-amber-400">
           {item.flags.map((f) => (

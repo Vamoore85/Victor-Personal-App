@@ -146,6 +146,7 @@ export type Bill = {
   institutionId?: string; // the company that sends the bill
   scope?: Scope;
   recurringId?: string; // the RecurringFinding it was confirmed from, when it came from a bank-history scan
+  emailSource?: { key: string; ids: string[]; evidence: string; created?: boolean }; // email evidence; never a posted bank payment
   note?: string;
 };
 
@@ -322,6 +323,7 @@ export type MoneyData = {
   siteCostRules?: number; // version of the bill-to-website matching applied (site-costs.ts)
   siteImports?: string[]; // websites already added from your directory (company|name), so one you delete stays deleted
   billImports?: string[]; // bills already added from a workbook (company|name), so one you delete stays deleted
+  emailBillImports?: string[]; // recurring email groups already routed, so deleted bills stay deleted
   docImports: DocImport[];
   briefings: BriefingSnapshot[];
 };
