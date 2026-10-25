@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { dbConfigured, readDoc, writeDoc } from "@/lib/db";
-import { extract, mergeFound, type EmailItem, type EmailStatus, type RawMessage } from "@/features/gmail/parse";
+import { extract, mergeFound, RULES, type EmailItem, type EmailStatus, type RawMessage } from "@/features/gmail/parse";
 import type { Scope } from "@/features/money/types";
 
 /*
@@ -20,7 +20,7 @@ import type { Scope } from "@/features/money/types";
 export type GoogleKeys = { clientId: string; secret: string };
 type Tokens = { access: string; accessExpires: number; refresh: string; scope: string };
 type Connection = { sealed: string; email: string; connectedAt: string };
-export type ScanInfo = { from: string; to: string; at: string; looked: number; kept: number; added: number; duplicates: number; capped: boolean };
+export type ScanInfo = { from: string; to: string; at: string; looked: number; kept: number; added: number; duplicates: number; capped: boolean; rechecked?: number; movedOut?: number };
 export type EmailDoc = { items: EmailItem[]; lastScan: ScanInfo | null };
 
 const KEYS_DOC = "gmail-keys";
@@ -34,7 +34,9 @@ const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 export const SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 
 export const MAX_DAYS = 180;
-export const MAX_MESSAGES = 400;
+export const MAX_MESSAGES = 400; // emails read per scan; the next scan carries on with the rest
+const MAX_LISTED = 3000; // ids are cheap to list, so emails already saved don't use up a scan
+const MAX_RECHECK = 150;
 
 export class GmailError extends Error {
   constructor(
@@ -248,40 +250,57 @@ export async function scan(days: number, today: string) {
   const span = Math.min(MAX_DAYS, Math.max(1, Math.round(days)));
   const from = addDays(today, -(span - 1));
   const tokens = await freshTokens(keys);
+  const saved = await readItems();
+  const known = new Set(saved.items.map((i) => i.id));
   const ids: string[] = [];
   let page: string | undefined;
   do {
-    const q = new URLSearchParams({ q: searchQuery(from, today), maxResults: "100", ...(page ? { pageToken: page } : {}) });
+    const q = new URLSearchParams({ q: searchQuery(from, today), maxResults: "500", ...(page ? { pageToken: page } : {}) });
     const res = await api<{ messages?: { id: string }[]; nextPageToken?: string }>(tokens, `/messages?${q}`);
     ids.push(...(res.messages ?? []).map((m) => m.id));
     page = res.nextPageToken;
-  } while (page && ids.length < MAX_MESSAGES);
-  const capped = Boolean(page) || ids.length > MAX_MESSAGES;
-  const look = ids.slice(0, MAX_MESSAGES);
+  } while (page && ids.length < MAX_LISTED);
+  const fresh = ids.filter((id) => !known.has(id));
 
-  const saved = await readItems();
-  const known = new Set(saved.items.map((i) => i.id));
+  // Emails found under older rules are read again: still-unreviewed ones the
+  // rules now say aren't bills move to "Not bills", and every one gets the
+  // link to its exact message.
+  const stale = saved.items.filter((i) => (i.rules ?? 0) < RULES).slice(0, MAX_RECHECK);
+  const look = fresh.slice(0, MAX_MESSAGES - stale.length);
+  const capped = Boolean(page) || fresh.length > look.length;
+
   const foundAt = new Date().toISOString();
-  const fresh = look.filter((id) => !known.has(id));
-  const found = (
-    await inBatches(fresh, 8, (id) =>
-      api<RawMessage>(tokens, `/messages/${encodeURIComponent(id)}?format=full&fields=id,internalDate,payload`)
-        .then((m) => extract(m, foundAt))
-        .catch((e) => {
-          if (e instanceof GmailError && e.status === 401) throw e;
-          return null; // one unreadable message doesn't stop the scan
-        }),
-    )
-  ).filter((x): x is EmailItem => x !== null);
+  const read = (id: string) =>
+    api<RawMessage>(tokens, `/messages/${encodeURIComponent(id)}?format=full&fields=id,internalDate,payload`)
+      .then((m) => ({ ok: true as const, item: extract(m, foundAt) }))
+      .catch((e) => {
+        if (e instanceof GmailError && e.status === 401) throw e;
+        return { ok: false as const, item: null }; // one unreadable message doesn't stop the scan
+      });
+  const found = (await inBatches(look, 8, read)).map((r) => r.item).filter((x): x is EmailItem => x !== null);
+  const again = new Map((await inBatches(stale, 8, (i) => read(i.id))).flatMap((r, n) => (r.ok ? [[stale[n].id, r.item] as const] : [])));
 
   let info: ScanInfo | null = null;
   await put(ITEMS_DOC, (current) => {
     const d = (current ?? {}) as Partial<EmailDoc>;
-    const merged = mergeFound(Array.isArray(d.items) ? d.items : [], found);
-    info = { from, to: today, at: foundAt, looked: look.length, kept: found.length, added: merged.added, duplicates: merged.duplicates, capped };
+    let movedOut = 0;
+    const kept = (Array.isArray(d.items) ? d.items : []).map((i) => {
+      if (!again.has(i.id)) return i;
+      const now = again.get(i.id) ?? null;
+      const next: EmailItem = { ...i, rules: RULES, ...(now?.messageId ? { messageId: now.messageId } : {}) };
+      // Only items you haven't touched move; anything you reviewed stays as you left it.
+      if (!now && i.status === "review" && !i.scope && !i.billId) {
+        movedOut++;
+        next.status = "ignored";
+        next.flags = [...i.flags, `Maverick's updated rules say this isn't a bill or receipt. Press "It is a bill" if it is one.`];
+      }
+      return next;
+    });
+    const merged = mergeFound(kept, found);
+    info = { from, to: today, at: foundAt, looked: look.length, kept: found.length, added: merged.added, duplicates: merged.duplicates, capped, rechecked: again.size, movedOut };
     return { items: merged.items, lastScan: info } satisfies EmailDoc;
   });
-  console.log(`gmail scan: days=${span} looked=${look.length} kept=${found.length} capped=${capped}`); // counts only
+  console.log(`gmail scan: days=${span} listed=${ids.length} looked=${look.length} kept=${found.length} rechecked=${again.size} capped=${capped}`); // counts only
   return info!;
 }
 

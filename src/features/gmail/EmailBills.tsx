@@ -17,7 +17,7 @@ import type { EmailItem } from "./parse";
  * The Google keys and sign-in tokens stay on the server (src/lib/gmail.ts).
  */
 
-type ScanInfo = { from: string; to: string; at: string; looked: number; kept: number; added: number; duplicates: number; capped: boolean };
+type ScanInfo = { from: string; to: string; at: string; looked: number; kept: number; added: number; duplicates: number; capped: boolean; rechecked?: number; movedOut?: number };
 type Status = {
   database: boolean;
   keys: boolean;
@@ -312,14 +312,15 @@ function Scan({ status, reload }: { status: Status; reload: () => Promise<void> 
         </button>
       </div>
       <p className="mt-2 text-xs text-zinc-500">
-        Searches email from {short(from)} to {short(to)}, up to 400 messages.
+        Searches email from {short(from)} to {short(to)}, reading up to 400 new messages per scan.
       </p>
       {error && <p className="mt-2 text-sm text-rose-600">{error}</p>}
       {last && (
         <p className="mt-2 text-sm" data-testid="gmail-last-scan">
           Last scan {short(last.from)} to {short(last.to)}: looked at {last.looked} emails, kept {last.kept} bills and receipts ({last.added} new
           {last.duplicates ? `, ${last.duplicates} repeats` : ""}).
-          {last.capped && " It stopped at 400 emails; pick a shorter range to see the rest."}
+          {last.movedOut ? ` Checked ${last.rechecked} earlier finds again with updated rules and moved ${last.movedOut} to Not bills.` : ""}
+          {last.capped && " There are more emails in this range: press Scan again to carry on where it stopped."}
         </p>
       )}
     </Card>
@@ -483,7 +484,7 @@ function ItemRow({
         <div>
           <dt className="text-zinc-500">Source</dt>
           <dd>
-            <a href={gmailLink(item.id, email)} target="_blank" rel="noreferrer" className="text-brand underline">
+            <a href={gmailLink(item, email)} target="_blank" rel="noreferrer" className="text-brand underline">
               Open in Gmail
             </a>
           </dd>
