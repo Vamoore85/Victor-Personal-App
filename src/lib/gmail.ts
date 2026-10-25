@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { dbConfigured, readDoc, writeDoc } from "@/lib/db";
+import { dbConfigured, getFile, putFile, readDoc, writeDoc } from "@/lib/db";
 import { extract, mergeFound, RULES, type EmailItem, type EmailStatus, type RawMessage } from "@/features/gmail/parse";
 import type { Scope } from "@/features/money/types";
 
@@ -372,23 +372,50 @@ export async function review(c: ReviewChange) {
 
 /* ---- Originals for downloads ---- */
 
-/**
- * A reader for the original emails (as .eml, exactly as Gmail has them), or
- * the reason they can't be read. Only reads; nothing in the mailbox changes.
- */
-export async function originalsReader(): Promise<{ read: (id: string) => Promise<Buffer | null> } | { why: string }> {
-  const keys = await getKeys().catch(() => null);
-  if (!keys) return { why: "Gmail isn't set up, so the original emails aren't included." };
-  let tokens: Tokens;
+const ORIGINAL = (id: string) => `gmail-receipt-original-${id}`;
+const MAX_ORIGINAL = 16 * 1024 * 1024;
+
+async function archived(id: string): Promise<Buffer | null> {
+  const f = await getFile(ORIGINAL(id)).catch(() => null);
+  if (!f) return null;
   try {
-    tokens = await freshTokens(keys);
-  } catch (e) {
-    return { why: e instanceof GmailError ? `${e.message} The original emails aren't included.` : "Couldn't reach Gmail, so the original emails aren't included." };
+    return Buffer.from(unseal<{ raw: string }>(f.data.toString("utf8")).raw, "base64url");
+  } catch {
+    return null; // sealed with an older site password
+  }
+}
+
+/**
+ * A reader for the original emails, exactly as Gmail has them (.eml, with
+ * their attachments). Emails you've filed under a company are kept as a
+ * private, encrypted copy the first time they're read, so the receipt
+ * survives even if the email is later deleted in Gmail. Only reads Gmail;
+ * nothing in the mailbox changes.
+ */
+export async function originalsReader(): Promise<{ read: (id: string, keep: boolean) => Promise<Buffer | null>; why: string | null }> {
+  let tokens: Tokens | null = null;
+  let why: string | null = null;
+  const keys = await getKeys().catch(() => null);
+  if (!keys) why = "Gmail isn't set up, so emails without a saved copy aren't included.";
+  else {
+    try {
+      tokens = await freshTokens(keys);
+    } catch (e) {
+      why = e instanceof GmailError ? `${e.message} Emails without a saved copy aren't included.` : "Couldn't reach Gmail, so emails without a saved copy aren't included.";
+    }
   }
   return {
-    read: (id) =>
-      api<{ raw?: string }>(tokens, `/messages/${encodeURIComponent(id)}?format=raw&fields=raw`)
-        .then((m) => (m.raw ? Buffer.from(m.raw, "base64url") : null))
-        .catch(() => null),
+    why,
+    read: async (id, keep) => {
+      if (!/^[a-f0-9]{1,64}$/i.test(id)) return null;
+      const saved = await archived(id);
+      if (saved || !tokens) return saved;
+      const m = await api<{ raw?: string }>(tokens, `/messages/${encodeURIComponent(id)}?format=raw&fields=raw`).catch(() => null);
+      if (!m?.raw || !/^[A-Za-z0-9_=-]+$/.test(m.raw)) return null;
+      const original = Buffer.from(m.raw, "base64url");
+      if (original.length > MAX_ORIGINAL) return null;
+      if (keep) await putFile(ORIGINAL(id), "application/octet-stream", Buffer.from(seal({ raw: m.raw }))).catch(() => undefined);
+      return original;
+    },
   };
 }
