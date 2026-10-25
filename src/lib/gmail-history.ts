@@ -30,8 +30,12 @@ export async function setHistoryImport(enabled: boolean) {
 
 /** One saved full-year batch per invocation; finished years are never restarted. */
 export async function runHistoryImport() {
+  if (!dbConfigured()) return {skipped:"not-configured"};
+  // Paused and finished jobs must not load years of mail metadata on every scheduled tick.
+  const settings=(await readDoc(KEY))?.data as Partial<HistoryImportState> | undefined;
+  if (!settings?.enabled) return {skipped:"paused"};
   const state = await historyImportStatus();
-  if (state.complete) return {skipped:"complete"};
+  if (state.complete) {await patch({enabled:false});return {skipped:"complete"};}
   if (!state.enabled || state.year === null || !state.asOf) return {skipped:"paused"};
   const at = new Date().toISOString();
   await patch({lastCheck:at});
