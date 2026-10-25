@@ -1,5 +1,5 @@
 import { connection } from "next/server";
-import { buildReport, reportCsv, reportText, type ReportPeriod } from "@/features/money/reports";
+import { buildReport, isCalendarDate, reportCsv, reportText, type ReportPeriod } from "@/features/money/reports";
 import type { Scope } from "@/features/money/types";
 import { dbConfigured, readDoc } from "@/lib/db";
 import { asMoney, MONEY_DOC } from "@/lib/money-doc";
@@ -8,12 +8,15 @@ import { sameOrigin, signedIn } from "@/lib/plaid-server";
 /** Read-only, authenticated reports from the saved financial document. */
 export async function GET(req: Request) {
   await connection();
-  if (!sameOrigin(req)) return Response.json({ error: "Forbidden" }, { status: 403 });
+  if (!sameOrigin(req) || req.headers.get("sec-fetch-site") === "cross-site") return Response.json({ error: "Forbidden" }, { status: 403 });
   if (!signedIn(req)) return Response.json({ error: "Sign in first." }, { status: 401 });
   const params = new URL(req.url).searchParams;
   const entity = params.get("entity") ?? "personal";
   const period = params.get("period") ?? "ytd";
   const format = params.get("format") ?? "json";
+  // The day the report ends on: the caller's local date, since the server clock is usually UTC.
+  const endParam = params.get("end");
+  const end = endParam && isCalendarDate(endParam) ? endParam : undefined;
   if (!["personal", "business", "gladiator"].includes(entity) || !["ytd", "12m", "30d"].includes(period) || !["json", "csv", "txt"].includes(format)) {
     return Response.json({ error: "Choose a valid entity, period (ytd, 12m, 30d), and format (json, csv, txt)." }, { status: 400 });
   }
@@ -21,7 +24,7 @@ export async function GET(req: Request) {
   try {
     const doc = await readDoc(MONEY_DOC);
     if (!doc) return Response.json({ error: "No saved financial data yet." }, { status: 404 });
-    const r = buildReport(asMoney(doc.data), entity as Scope, period as ReportPeriod);
+    const r = buildReport(asMoney(doc.data), entity as Scope, period as ReportPeriod, end);
     const body = format === "csv" ? reportCsv(r) : format === "txt" ? reportText(r) : JSON.stringify(r);
     return new Response(body, { headers: {
       "Content-Type": format === "csv" ? "text/csv; charset=utf-8" : format === "txt" ? "text/plain; charset=utf-8" : "application/json",

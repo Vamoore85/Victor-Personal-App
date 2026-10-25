@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { useCloudState, useMoneyData, reloadFromCloud } from "./store";
 import { buildReport, reportCsv, reportText, type ReportPeriod } from "./reports";
 import { ENTITIES } from "./outlook";
-import { money } from "./calc";
+import { money, today } from "./calc";
 import { Card, buttonClass, ghostButtonClass } from "./ui";
 import type { Scope } from "./types";
 
@@ -25,7 +25,9 @@ export function ReportsPage() {
   const [period, setPeriod] = useState<ReportPeriod>("ytd");
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState("");
-  const report = useMemo(() => data ? buildReport(data, entity, period) : null, [data, entity, period]);
+  // The day is part of the key, so a page left open past midnight moves to the new period. Read only once data has loaded in the browser.
+  const day = data ? today() : "";
+  const report = useMemo(() => data ? buildReport(data, entity, period, day) : null, [data, entity, period, day]);
   if (!report) return <p role="status">Loading your report…</p>;
   const base = `maverick-${entity}-${report.period.start}-${report.period.end}`;
   return <div className="report-page mx-auto flex max-w-5xl flex-col gap-6 text-base leading-relaxed">
@@ -51,10 +53,10 @@ export function ReportsPage() {
     <header className="flex flex-wrap items-start justify-between gap-4 border-b border-zinc-200 pb-5 dark:border-zinc-800">
       <div><h2 className="text-2xl font-semibold">{report.label} financial report</h2><p className="mt-1 text-zinc-600 dark:text-zinc-400">{report.period.start} – {report.period.end}</p><p className="mt-1 text-sm text-zinc-500">Built from saved transactions. Refresh does not initiate a bank sync.</p></div>
       <div className="report-controls flex flex-wrap gap-2">
-        <button className={`${ghostButtonClass} min-h-11`} onClick={() => download(reportText(report), `${base}.txt`, "text/plain")}>Download report</button>
+        <button className={`${ghostButtonClass} min-h-11`} onClick={() => download(reportText(report), `${base}.txt`, "text/plain;charset=utf-8")}>Download report</button>
         <details className="relative"><summary className={`${ghostButtonClass} min-h-11 cursor-pointer`}>Export options</summary><div className="absolute right-0 z-10 mt-2 flex w-56 flex-col gap-2 rounded-xl border border-zinc-200 bg-surface p-3 shadow-lg dark:border-zinc-700">
-          <button className="p-2 text-left text-sm" onClick={() => download(reportCsv(report), `${base}-transactions.csv`, "text/csv")}>Transactions CSV</button>
-          <button className="p-2 text-left text-sm" onClick={() => download(JSON.stringify(report, null, 2), `${base}.json`, "application/json")}>Structured report JSON</button>
+          <button className="p-2 text-left text-sm" onClick={() => download(reportCsv(report), `${base}-transactions.csv`, "text/csv;charset=utf-8")}>Transactions CSV</button>
+          <button className="p-2 text-left text-sm" onClick={() => download(JSON.stringify(report, null, 2), `${base}.json`, "application/json;charset=utf-8")}>Structured report JSON</button>
           <button className="p-2 text-left text-sm" onClick={() => window.print()}>Print / Save PDF</button>
         </div></details>
       </div>
