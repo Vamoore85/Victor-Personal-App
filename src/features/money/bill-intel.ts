@@ -97,6 +97,9 @@ const MOVEMENT = /\b(XFER|TRANSFER|ZELLE|VENMO|CASH ?APP|ATM|CASH WITHDRAWAL|WIT
  * name so its payments are looked at together.
  */
 const CHECK = /^CHECK\b|\bCHECK ?#|\bCHECK NUMBER\b|\bCHECK \d|\bCHK\b/i;
+// CHK also means a checking account in bank transfer descriptions.
+const ACCOUNT_TRANSFER = /\b(XFER|TRANSFER)\b/i;
+const writtenCheck = (description: string) => CHECK.test(description) && !ACCOUNT_TRANSFER.test(description);
 const CHILD_SUPPORT = /CHILD ?SUPPORT|\bCSEA\b|\bCSES\b|\bSDU\b|FAMILY SUPPORT|SUPPORT ENFORCEMENT/i;
 const PERSON_PAYMENT = /\b(ZELLE|VENMO|CASH ?APP)\b.*\b(TO|SENT|PAYMENT)\b|\b(TO|SENT|PAYMENT)\b.*\b(ZELLE|VENMO|CASH ?APP)\b/i;
 const NOT_OUTGOING = /\b(DEPOSIT(ED)?|REFUND|REVERSAL|RETURN(ED)?|FROM)\b|^RETURN-/i;
@@ -113,7 +116,7 @@ export function groupKey(t: Transaction): string {
   if (CHILD_SUPPORT.test(d)) return "CHILD SUPPORT";
   if (BGE.test(d)) return "BGE";
   if (/VERIZON|\bVZW\b/i.test(d)) return "VERIZON";
-  if (CHECK.test(d)) return `CHECK ${Math.round(t.amount)}`; // checks to the same payee are usually the same amount
+  if (writtenCheck(d)) return `CHECK ${Math.round(t.amount)}`; // checks to the same payee are usually the same amount
   for (const m of MONTHLY_TOTALS) if (m.re.test(d)) return m.key;
   return merchantKey(d);
 }
@@ -124,13 +127,13 @@ const CARD_PAYMENT = /\b(CRD PMT|CARD ?PAYMENT|CREDIT CARD|CC PMT|EPAYMENT|E-PAY
 export const isCardPayment = (t: Transaction) => t.category === "Debt payments" || CARD_PAYMENT.test(t.description);
 
 /** Bump when the rules below change, so saved scans are redone. */
-export const SCAN_RULES = 8;
+export const SCAN_RULES = 9;
 
 export function isCandidate(t: Transaction, direction: "out" | "in") {
   if (direction === "out" && t.kind === "expense" && t.amount > 0 && t.transferId !== "imported" && isCardPayment(t) && !/\b(REFUND|REVERSAL|RETURN)\b/i.test(t.description)) return true;
   if (direction === "out" && t.kind === "expense" && t.amount > 0 && t.transferId !== "imported" && !NOT_OUTGOING.test(t.description)) {
     // Checks you wrote, child support and regular payments to a person are bills even when filed as transfers.
-    if (CHECK.test(t.description) || CHILD_SUPPORT.test(t.description) || PERSON_PAYMENT.test(t.description)) return true;
+    if (writtenCheck(t.description) || CHILD_SUPPORT.test(t.description) || PERSON_PAYMENT.test(t.description)) return true;
     // Gas and Apple are added up per month even when filed as food or shopping.
     if (!t.transferId && MONTHLY_TOTALS.some((m) => m.re.test(t.description))) return true;
   }
