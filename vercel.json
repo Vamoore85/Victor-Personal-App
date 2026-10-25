@@ -1,4 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "crons": [{ "path": "/api/gmail/auto-scan", "schedule": "*/30 * * * *" }]
+  "crons": [
+    { "path": "/api/gmail/auto-scan", "schedule": "*/30 * * * *" },
+    { "path": "/api/gmail/history-scan", "schedule": "2-59/5 * * * *" }
+  ]
 }

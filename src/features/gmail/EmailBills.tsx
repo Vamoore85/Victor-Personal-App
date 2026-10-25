@@ -12,6 +12,7 @@ import type { EmailItem } from "./parse";
 import { SCAN_BATCH_SIZE, scanRange } from "./scan-history";
 import { ReceiptFolders } from "@/features/receipts/ReceiptFolders";
 import type { AutomaticMailState } from "./automatic";
+import type { HistoryImportStatus } from "./history-import";
 
 /*
  * Email bills: a read-only Gmail link that finds bills and receipts in a date
@@ -72,10 +73,12 @@ export function EmailBillsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [yearFilter, setYearFilter] = useState<string | undefined>();
+  const [receiptRevision,setReceiptRevision] = useState(0);
 
   const load = useCallback(async () => {
     try {
       setStatus(await call<Status>("status"));
+      setReceiptRevision(r=>r+1);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -97,7 +100,10 @@ export function EmailBillsScreen() {
       .catch((e: Error) => setError(e.message));
   }, []);
 
-  const onItem = useCallback((item: EmailItem) => setStatus((s) => s && { ...s, items: s.items.map((i) => (i.id === item.id ? item : i)) }), []);
+  const onItem = useCallback((item: EmailItem) => {
+    setStatus((s) => s && { ...s, items: s.items.map((i) => (i.id === item.id ? item : i)) });
+    setReceiptRevision(r=>r+1);
+  }, []);
 
   return (
     <div className="flex flex-col gap-4" data-testid="email-bills">
@@ -111,7 +117,7 @@ export function EmailBillsScreen() {
           <Connection status={status} reload={load} />
           {status.connected && <AutomaticMail reload={load} />}
           {status.connected && <Scan status={status} reload={load} onYearChange={setYearFilter} />}
-          <ReceiptFolders selectedYear={yearFilter} onYearChange={setYearFilter} refreshKey={status.lastScan?.at} />
+          <ReceiptFolders selectedYear={yearFilter} onYearChange={setYearFilter} refreshKey={`${status.lastScan?.at ?? ""}:${receiptRevision}`} />
           {status.items.length > 0 && <Review status={status} reload={load} onItem={onItem} year={yearFilter} />}
         </>
       )}
@@ -124,7 +130,7 @@ function ScopeNote() {
     <section className="rounded-xl border border-zinc-200 bg-surface p-4 text-sm dark:border-zinc-800" data-testid="gmail-scope">
       <h2 className="font-medium">What Maverick reads in your Gmail</h2>
       <ul className="mt-2 list-disc space-y-1 pl-5 text-zinc-600 dark:text-zinc-400">
-        <li>Automatic checks read recent financial emails in the background when enabled below. Manual scans read the period you pick and continue while this page stays open; Pause stops after the current batch.</li>
+        <li>Automatic checks read recent financial emails, and the older-history import works through earlier years. Both run in the background when enabled below. Manual scans read the period you pick and continue while this page stays open; Pause stops after the current batch.</li>
         <li>Only emails that look like bills or receipts. Chats, promotions, social and forum mail are skipped, and an email that isn&apos;t a bill or receipt is dropped without saving anything from it.</li>
         <li>A scan saves the sender, subject, amount, dates and source reference. Download ZIP on Receipt folders reads the original emails, attachments included, and keeps a private encrypted copy of the ones you&apos;ve filed under a company.</li>
         <li>Read-only. It can&apos;t send, delete, move or mark email, and it never asks for your Google password: Google&apos;s own screen does the sign-in.</li>
@@ -141,6 +147,16 @@ function AutomaticMail({reload}: {reload:()=>Promise<void>}) {
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState("");
   useEffect(()=> { call<{automatic:AutoState}>("automatic").then(r=>setState(r.automatic)).catch(e=>setError(e.message)); },[]);
+  useEffect(()=> {
+    if (!state?.enabled) return;
+    const timer=setInterval(()=> {
+      void call<{automatic:AutoState}>("automatic").then(r=> {
+        setState(r.automatic);
+        if (r.automatic.lastSuccess !== state.lastSuccess) void reload();
+      }).catch(e=>setError(e.message));
+    },60000);
+    return ()=>clearInterval(timer);
+  },[state?.enabled,state?.lastSuccess,reload]);
   async function act(body: Record<string,unknown>) {
     setBusy(true); setError("");
     try {
@@ -161,7 +177,43 @@ function AutomaticMail({reload}: {reload:()=>Promise<void>}) {
     {state?.lastCheck && <p className="mt-1 text-sm">Last check: {new Date(state.lastCheck).toLocaleString()}{state.looked !== undefined ? ` · ${state.looked} emails examined` : ""}</p>}
     {state?.lastNote && <p className="mt-1 text-sm text-zinc-500">{state.lastNote}</p>}
     {(error || state?.lastError) && <p role="status" className="mt-2 text-sm text-amber-700">{error || state?.lastError} {error && <button className="underline" onClick={()=> {setError("");void call<{automatic:AutoState}>("automatic").then(r=>setState(r.automatic)).catch(e=>setError(e.message));}}>Retry settings</button>}</p>}
+    <HistoryImport reload={reload} />
   </section>;
+}
+
+function HistoryImport({reload}: {reload:()=>Promise<void>}) {
+  const [state,setState]=useState<HistoryImportStatus | null>(null);
+  const [error,setError]=useState("");
+  const [busy,setBusy]=useState(false);
+  const load=useCallback(async()=> {
+    const result=await call<{history:HistoryImportStatus}>("history");
+    setState(result.history);
+    setError("");
+    return result.history;
+  },[]);
+  useEffect(()=> {void Promise.resolve().then(load).catch(e=>setError(e.message));},[load]);
+  useEffect(()=> {
+    if (!state?.enabled) return;
+    const timer=setInterval(()=> {
+      void load().then(next=> {if(next.lastSuccess !== state.lastSuccess) void reload();}).catch(e=>setError(e.message));
+    },60000);
+    return ()=>clearInterval(timer);
+  },[state?.enabled,state?.lastSuccess,load,reload]);
+  async function toggle() {
+    setBusy(true);setError("");
+    try {setState((await call<{history:HistoryImportStatus}>("history",{enabled:!state?.enabled})).history);}
+    catch(e) {setError((e as Error).message);} finally {setBusy(false);}
+  }
+  return <div className="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-800" data-testid="history-import">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="font-medium">Older receipt import · {state?.complete ? "Complete" : state?.enabled ? "Running" : state?.startedAt ? "Paused" : "Not started"}</p>
+      {!state?.complete && <button className={ghostButtonClass} disabled={busy || !state?.configured} onClick={()=>void toggle()}>{state?.enabled ? "Pause history import" : state?.startedAt ? "Resume history import" : "Start older receipt import"}</button>}
+    </div>
+    {state && <p className="mt-2 text-sm text-zinc-500">{state.startYear} back to {state.throughYear} · {state.completedYears.length} of {state.totalYears} years finished · {state.examined.toLocaleString()} emails examined</p>}
+    {state?.enabled && <p className="mt-1 text-sm">Checking {state.year} · {state.currentExamined.toLocaleString()} examined in this year · Runs with this page closed</p>}
+    {state?.lastNote && <p className="mt-1 text-sm text-zinc-500">{state.lastNote}</p>}
+    {(error || state?.lastError) && <p role="status" className="mt-2 text-sm text-amber-700">{error || state?.lastError} {error && <button className="underline" onClick={()=>void load().catch(e=>setError(e.message))}>Retry settings</button>}</p>}
+  </div>;
 }
 
 function Connection({ status, reload }: { status: Status; reload: () => Promise<void> }) {
@@ -210,7 +262,8 @@ function Connection({ status, reload }: { status: Status; reload: () => Promise<
         {status.connectedAt ? ` since ${short(status.connectedAt.slice(0, 10))}` : ""}. Read-only.
       </p>
       {error && <p className="mt-2 text-sm text-rose-600">{error}</p>}
-      <div className="mt-3">
+      <div className="mt-3 flex flex-wrap gap-2">
+        <a href="/api/gmail/connect" className={ghostButtonClass}>Reconnect Gmail</a>
         <button className={ghostButtonClass} onClick={disconnect} disabled={busy}>
           {busy ? "Disconnecting…" : "Disconnect Gmail"}
         </button>
@@ -416,6 +469,7 @@ const TABS: { id: Tab; label: string }[] = [
 function Review({ status, reload, onItem, year }: { status: Status; reload: () => Promise<void>; onItem: (item: EmailItem) => void; year?: string }) {
   const data = useMoneyData();
   const [tab, setTab] = useState<Tab>("review");
+  const [visible,setVisible] = useState(100);
   const items = year ? status.items.filter(item => (item.billDate ?? item.emailDate).slice(0, 4) === year) : status.items;
   const byId = useMemo(() => new Map(status.items.map((i) => [i.id, i])), [status.items]);
   const shown = items.filter((i) => i.status === tab);
@@ -442,7 +496,7 @@ function Review({ status, reload, onItem, year }: { status: Status; reload: () =
               key={t.id}
               role="tab"
               aria-selected={tab === t.id}
-              onClick={() => setTab(t.id)}
+              onClick={() => {setTab(t.id);setVisible(100);}}
               className={`rounded-full px-3 py-1 text-sm ${tab === t.id ? "bg-brand text-on-brand" : "border border-zinc-300 dark:border-zinc-700"}`}
             >
               {t.label} ({n})
@@ -457,11 +511,12 @@ function Review({ status, reload, onItem, year }: { status: Status; reload: () =
         <p className="text-sm text-zinc-500">{tab === "review" ? "Nothing left to review." : "None."}</p>
       ) : (
         <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
-          {shown.map((i) => (
+          {shown.slice(0,visible).map((i) => (
             <ItemRow key={i.id} item={i} first={i.duplicateOf ? byId.get(i.duplicateOf) : undefined} email={status.email} data={data} change={change} />
           ))}
         </ul>
       )}
+      {shown.length > visible && <button className={`${ghostButtonClass} mt-3`} onClick={()=>setVisible(n=>n+100)}>Show next {Math.min(100,shown.length-visible)} · {shown.length-visible} more</button>}
     </Card>
   );
 }
