@@ -27,7 +27,7 @@ type Loaded = { years: YearSummary[]; entries: FolderEntry[]; email: string | nu
 
 const zipUrl = (year: string, section?: Section) => `/api/receipt-folders/zip?year=${year}${section ? `&section=${section}` : ""}`;
 
-export function ReceiptFolders() {
+export function ReceiptFolders({ selectedYear, onYearChange, refreshKey }: { selectedYear?: string; onYearChange?: (year: string) => void; refreshKey?: string } = {}) {
   const [data, setData] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [year, setYear] = useState<string | null>(null);
@@ -41,14 +41,14 @@ export function ReceiptFolders() {
         if (!r.ok) throw new Error(json.error || "Couldn't load your receipt folders.");
         return json as Loaded;
       })
-      .then((d) => live && setData(d))
+      .then((d) => { if (live) { setData(d); setError(null); } })
       .catch((e) => live && setError((e as Error).message));
     return () => {
       live = false;
     };
-  }, []);
+  }, [refreshKey]);
 
-  const shownYear = year ?? data?.years[0]?.year ?? null;
+  const shownYear = selectedYear ?? year ?? data?.years[0]?.year ?? null;
   const summary = data?.years.find((y) => y.year === shownYear);
   const inYear = data?.entries.filter((e) => e.year === shownYear) ?? [];
 
@@ -81,6 +81,7 @@ export function ReceiptFolders() {
                 aria-selected={y.year === shownYear}
                 onClick={() => {
                   setYear(y.year);
+                  onYearChange?.(y.year);
                   setOpen(null);
                 }}
                 className={`rounded-full px-3 py-1 text-sm ${y.year === shownYear ? "bg-brand text-on-brand" : "border border-zinc-300 dark:border-zinc-700"}`}

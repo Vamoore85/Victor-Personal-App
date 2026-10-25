@@ -1,14 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { money } from "@/features/money/calc";
 import { newId, setMoneyData, useMoneyData } from "@/features/money/store";
 import type { Bill, MoneyData, Scope } from "@/features/money/types";
 import { Card, Field, buttonClass, ghostButtonClass, inputClass } from "@/features/money/ui";
-import { addDays, prettyDate, today } from "@/lib/dates";
+import { prettyDate, today } from "@/lib/dates";
 import { gmailLink, suggestBill, suggestScope } from "./match";
 import type { EmailItem } from "./parse";
+import { scanRange } from "./scan-history";
 import { ReceiptFolders } from "@/features/receipts/ReceiptFolders";
 
 /*
@@ -18,7 +19,7 @@ import { ReceiptFolders } from "@/features/receipts/ReceiptFolders";
  * The Google keys and sign-in tokens stay on the server (src/lib/gmail.ts).
  */
 
-type ScanInfo = { from: string; to: string; at: string; looked: number; kept: number; added: number; duplicates: number; capped: boolean; rechecked?: number; movedOut?: number };
+type ScanInfo = { from: string; to: string; at: string; looked: number; kept: number; added: number; duplicates: number; capped: boolean; rechecked?: number; movedOut?: number; totalLooked?: number; totalKept?: number; failed?: number };
 type Status = {
   database: boolean;
   keys: boolean;
@@ -65,6 +66,7 @@ export function EmailBillsScreen() {
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [yearFilter, setYearFilter] = useState<string | undefined>();
 
   const load = useCallback(async () => {
     try {
@@ -102,9 +104,9 @@ export function EmailBillsScreen() {
       ) : (
         <>
           <Connection status={status} reload={load} />
-          {status.connected && <Scan status={status} reload={load} />}
-          <ReceiptFolders />
-          {status.items.length > 0 && <Review status={status} reload={load} onItem={onItem} />}
+          {status.connected && <Scan status={status} reload={load} onYearChange={setYearFilter} />}
+          <ReceiptFolders selectedYear={yearFilter} onYearChange={setYearFilter} refreshKey={status.lastScan?.at} />
+          {status.items.length > 0 && <Review status={status} reload={load} onItem={onItem} year={yearFilter} />}
         </>
       )}
     </div>
@@ -116,7 +118,7 @@ function ScopeNote() {
     <section className="rounded-xl border border-zinc-200 bg-surface p-4 text-sm dark:border-zinc-800" data-testid="gmail-scope">
       <h2 className="font-medium">What Maverick reads in your Gmail</h2>
       <ul className="mt-2 list-disc space-y-1 pl-5 text-zinc-600 dark:text-zinc-400">
-        <li>Only when you press Scan, and only the date range you pick (90 days unless you choose another).</li>
+        <li>Only when you press Scan, and only the period you pick. A scan continues in batches while this page stays open; Pause stops after the current batch.</li>
         <li>Only emails that look like bills or receipts. Chats, promotions, social and forum mail are skipped, and an email that isn&apos;t a bill or receipt is dropped without saving anything from it.</li>
         <li>A scan saves the sender, subject, amount, dates and source reference. Download ZIP on Receipt folders reads the original emails, attachments included, and keeps a private encrypted copy of the ones you&apos;ve filed under a company.</li>
         <li>Read-only. It can&apos;t send, delete, move or mark email, and it never asks for your Google password: Google&apos;s own screen does the sign-in.</li>
@@ -278,19 +280,33 @@ function ReplaceKeys({ redirectUri, onSaved }: { redirectUri: string; onSaved: (
   );
 }
 
-function Scan({ status, reload }: { status: Status; reload: () => Promise<void> }) {
-  const [days, setDays] = useState(90);
+function Scan({ status, reload, onYearChange }: { status: Status; reload: () => Promise<void>; onYearChange: (year: string | undefined) => void }) {
+  const [period, setPeriod] = useState("90");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const to = today();
-  const from = addDays(to, -(days - 1));
+  const [batchNote, setBatchNote] = useState("");
+  const paused = useRef(false);
+  useEffect(() => () => { paused.current = true; }, []);
+  const now = today();
+  const selectedYear = period.startsWith("year:") ? Number(period.slice(5)) : undefined;
+  const { from, to } = scanRange(Number(period) || 90, now, selectedYear);
   const last = status.lastScan;
-  async function run() {
+  const samePeriod = last?.from === from && last?.to === to;
+  async function run(restart = false) {
+    paused.current = false;
     setBusy(true);
     setError(null);
     try {
-      await call("scan", { days });
-      await reload();
+      let more = true;
+      let batches = 0;
+      while (more && !paused.current && batches < 200) {
+        const result = await call<{ scan: ScanInfo }>("scan", { days: Number(period) || 90, ...(selectedYear ? { year: selectedYear } : {}), restart: restart && batches === 0 });
+        batches++;
+        setBatchNote(`${result.scan.totalLooked ?? result.scan.looked} emails examined in this period`);
+        await reload();
+        more = result.scan.capped;
+        if (result.scan.failed) break; // show failed reads for a deliberate retry rather than spinning
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -300,29 +316,36 @@ function Scan({ status, reload }: { status: Status; reload: () => Promise<void> 
   return (
     <Card title="Scan for bills and receipts">
       <div className="flex flex-wrap items-end gap-3">
-        <Field label="Look back">
-          <select className={inputClass} value={days} onChange={(e) => setDays(Number(e.target.value))} data-testid="gmail-range">
+        <Field label="Period">
+          <select className={inputClass} value={period} disabled={busy} onChange={(e) => { setPeriod(e.target.value); setBatchNote(""); onYearChange(e.target.value.startsWith("year:") ? e.target.value.slice(5) : undefined); }} data-testid="gmail-range">
             {RANGES.filter((d) => d <= status.maxDays).map((d) => (
               <option key={d} value={d}>
                 Last {d} days
               </option>
             ))}
+            <optgroup label="Earlier years">
+              {Array.from({ length: Number(now.slice(0, 4)) - 2003 }, (_, i) => Number(now.slice(0, 4)) - i).map(year => <option key={year} value={`year:${year}`}>{year}{year === Number(now.slice(0, 4)) ? " · year to date" : " · full year"}</option>)}
+            </optgroup>
           </select>
         </Field>
-        <button className={buttonClass} onClick={run} disabled={busy} data-testid="gmail-scan">
-          {busy ? "Scanning…" : "Scan"}
+        <button className={buttonClass} onClick={() => void run()} disabled={busy} data-testid="gmail-scan">
+          {busy ? "Scanning…" : samePeriod && last.capped ? "Continue scan" : "Scan"}
         </button>
+        {busy ? <button className={ghostButtonClass} onClick={() => { paused.current = true; setBatchNote("Pausing after the current batch…"); }}>Pause</button> : samePeriod && last.capped ? <button className={ghostButtonClass} onClick={() => void run(true)}>Restart period</button> : null}
       </div>
       <p className="mt-2 text-xs text-zinc-500">
-        Searches email from {short(from)} to {short(to)}, reading up to 400 new messages per scan.
+        Searches email from {short(from)} to {short(to)}. Up to 400 messages per batch; saved progress continues into older results.
       </p>
+      {batchNote && <p role="status" className="mt-2 text-sm">{batchNote}</p>}
       {error && <p className="mt-2 text-sm text-rose-600">{error}</p>}
       {last && (
         <p className="mt-2 text-sm" data-testid="gmail-last-scan">
           Last scan {short(last.from)} to {short(last.to)}: looked at {last.looked} emails, kept {last.kept} bills and receipts ({last.added} new
           {last.duplicates ? `, ${last.duplicates} repeats` : ""}).
-          {last.movedOut ? ` Checked ${last.rechecked} earlier finds again with updated rules and moved ${last.movedOut} to Not bills.` : ""}
-          {last.capped && " There are more emails in this range: press Scan again to carry on where it stopped."}
+          {last.movedOut ? ` Rechecked ${last.rechecked} earlier finds and moved ${last.movedOut} to Not bills.` : ""}
+          {last.totalLooked !== undefined && ` Total examined in this period: ${last.totalLooked}.`}
+          {last.capped ? " More remains in this period. Continue scan resumes saved progress." : " This period is finished."}
+          {last.failed ? ` ${last.failed} emails could not be read; continue to retry them.` : ""}
         </p>
       )}
     </Card>
@@ -337,11 +360,11 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "ignored", label: "Not bills" },
 ];
 
-function Review({ status, reload, onItem }: { status: Status; reload: () => Promise<void>; onItem: (item: EmailItem) => void }) {
+function Review({ status, reload, onItem, year }: { status: Status; reload: () => Promise<void>; onItem: (item: EmailItem) => void; year?: string }) {
   const data = useMoneyData();
   const [tab, setTab] = useState<Tab>("review");
-  const items = status.items;
-  const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  const items = year ? status.items.filter(item => (item.billDate ?? item.emailDate).slice(0, 4) === year) : status.items;
+  const byId = useMemo(() => new Map(status.items.map((i) => [i.id, i])), [status.items]);
   const shown = items.filter((i) => i.status === tab);
 
   async function change(id: string, c: Record<string, unknown>) {
