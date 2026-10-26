@@ -5,7 +5,8 @@ import type { MoneyData, Receipt, Scope } from "@/features/money/types";
  * Receipt folders: every receipt and bill you have, filed by year and then by
  * whose it is: Personal, Maverick or Gladiator. Anything not certain yet goes
  * in Needs review instead of being guessed: an email bill you haven't
- * confirmed, or a receipt photo with no company or no amount.
+ * confirmed, a receipt photo with no company or no amount, or a scan whose
+ * store, date and total you haven't checked.
  *
  * Filing only reads. It never confirms an email, never changes a bill, and
  * never marks anything paid; "paid" only ever comes from the bank.
@@ -64,7 +65,13 @@ function fromEmail(i: EmailItem): FolderEntry | null {
 }
 
 function fromUpload(r: Receipt): FolderEntry {
-  const why = !isScope(r.scope) ? "No company picked yet." : r.amount === null ? "No amount typed yet." : null;
+  const why = !isScope(r.scope)
+    ? "No company picked yet."
+    : r.amount === null
+      ? "No amount typed yet."
+      : r.unchecked
+        ? "Scanned; you haven't checked what was read yet."
+        : null;
   return {
     key: `upload-${r.id}`,
     source: "upload",

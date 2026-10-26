@@ -2,6 +2,7 @@ import Link from "next/link";
 import { LIFE_AREAS } from "@/config/app";
 import { Icon } from "@/components/icons";
 import { Greeting } from "./Greeting";
+import { ScanPanel } from "@/features/receipts/ScanReceipt";
 
 const primary = [
   { slug: "money", short: "Money", label: "Money", blurb: "What you have, what's coming out, and what needs attention", href: "/money" },
@@ -15,6 +16,7 @@ export default function Home() {
         <Greeting />
         <p className="mt-3 text-base leading-relaxed text-zinc-600 dark:text-zinc-400">Your personal dashboard. Start with what you need today.</p>
       </header>
+      <ScanPanel />
       <section className="grid gap-4 sm:grid-cols-3" aria-label="Everyday tools">
         {primary.map((area) => {
           const slug = area.slug;

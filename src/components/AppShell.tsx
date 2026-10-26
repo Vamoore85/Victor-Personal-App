@@ -151,8 +151,16 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Avatar size={28} />
           <span className="truncate font-semibold tracking-tight">{current ? current.label : APP_NAME}</span>
         </Link>
+        <Link
+          href="/scan"
+          className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-full bg-brand px-3 text-sm font-medium text-on-brand"
+          aria-label="Scan a receipt"
+        >
+          <Icon name="camera" width={18} height={18} />
+          Scan
+        </Link>
         <button
-          className="ml-auto hidden h-9 w-9 items-center justify-center rounded-full bg-zinc-100 md:inline-flex dark:bg-zinc-800"
+          className="hidden h-9 w-9 items-center justify-center rounded-full bg-zinc-100 md:inline-flex dark:bg-zinc-800"
           aria-label="Open menu"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen(true)}

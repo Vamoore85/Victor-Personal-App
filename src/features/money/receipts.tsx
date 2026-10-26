@@ -9,6 +9,7 @@ import { COMPANIES, companyLabel, isCompany, type MoneyData, type Receipt, type 
 import { businessCategory } from "./books";
 import { Card, Empty, Field, Stat, buttonClass, ghostButtonClass, inputClass } from "./ui";
 import { ReceiptFolders } from "@/features/receipts/ReceiptFolders";
+import { ScanReceipt } from "@/features/receipts/ScanReceipt";
 
 /*
  * Receipts: photos or PDFs saved to the online database and tied to the
@@ -36,7 +37,7 @@ async function shrink(file: File): Promise<Blob> {
 }
 
 /** Uploads a file and returns the new receipt record (not yet saved to the money data). */
-async function uploadReceipt(file: File, base: Partial<Receipt>): Promise<Receipt> {
+export async function uploadReceipt(file: File, base: Partial<Receipt>): Promise<Receipt> {
   const blob = await shrink(file);
   const id = newId();
   const res = await fetch(`/api/receipts?id=${encodeURIComponent(id)}`, {
@@ -53,7 +54,7 @@ async function uploadReceipt(file: File, base: Partial<Receipt>): Promise<Receip
     amount: base.amount ?? null,
     note: "",
     transactionId: base.transactionId,
-    scope: base.scope ?? "personal",
+    scope: "scope" in base ? base.scope : "personal", // a scan leaves it unset until you pick
     contentType: blob.type || file.type,
     size: json.size ?? blob.size,
     addedAt: new Date().toISOString(),
@@ -61,7 +62,7 @@ async function uploadReceipt(file: File, base: Partial<Receipt>): Promise<Receip
 }
 
 /** Expense transactions a receipt probably belongs to: same amount within a week, closest date first. */
-function likelyMatches(data: MoneyData, r: Receipt) {
+export function likelyMatches(data: MoneyData, r: Receipt) {
   if (r.amount === null) return [];
   const taken = new Set(data.receipts.filter((x) => x.transactionId && x.id !== r.id).map((x) => x.transactionId));
   return data.transactions
@@ -95,7 +96,7 @@ function removeReceipt(r: Receipt) {
   setMoneyData((d) => ({ ...d, receipts: d.receipts.filter((x) => x.id !== r.id) }));
 }
 
-function updateReceipt(id: string, patch: Partial<Receipt>) {
+export function updateReceipt(id: string, patch: Partial<Receipt>) {
   setMoneyData((d) => ({ ...d, receipts: d.receipts.map((r) => (r.id === id ? { ...r, ...patch } : r)) }));
 }
 
@@ -181,11 +182,13 @@ export function Receipts({ data }: { data: MoneyData }) {
         <Stat label={`Business costs missing a receipt (${year})`} value={String(missing.length)} tone={missing.length > 0 ? "bad" : "good"} />
       </div>
 
+      <ScanReceipt data={data} />
+
       <ReceiptFolders />
 
-      <Card title="Add receipts">
+      <Card title="Add saved photos or PDFs">
         <p className="mb-4 text-sm text-zinc-500">
-          On your phone, this opens the camera or your photos. Snap the receipt, then type the amount below and pick the matching purchase.
+          For receipts already on your phone or computer. Pick several at once, then type the amount below and pick the matching purchase.
         </p>
         <input ref={input} type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => onPick(e.target.files)} />
         <button className={buttonClass} onClick={() => input.current?.click()} disabled={busy > 0}>
@@ -286,7 +289,8 @@ function ReceiptRow({ r, data, matched }: { r: Receipt; data: MoneyData; matched
             <input type="date" className={inputClass} value={r.date} onChange={(e) => e.target.value && updateReceipt(r.id, { date: e.target.value })} />
           </Field>
           <Field label="Whose is it">
-            <select className={inputClass} value={r.scope ?? "personal"} onChange={(e) => updateReceipt(r.id, { scope: e.target.value as Scope })}>
+            <select className={inputClass} value={r.scope ?? ""} onChange={(e) => e.target.value && updateReceipt(r.id, { scope: e.target.value as Scope })}>
+              {!r.scope && <option value="">Pick one</option>}
               {scopes.map((s) => (
                 <option key={s} value={s}>
                   {s === "personal" ? "Personal" : companyLabel(s)}
@@ -322,7 +326,17 @@ function ReceiptRow({ r, data, matched }: { r: Receipt; data: MoneyData; matched
             <span className="text-zinc-400">{r.amount === null ? "Type the amount to find the matching purchase." : "No purchase with this amount within a week yet."}</span>
           )}
           <span className="ml-auto flex items-center gap-3">
-            <ScopeBadge item={r} />
+            {r.unchecked && (
+              <button
+                className={ghostButtonClass}
+                disabled={!r.scope || r.amount === null}
+                title={!r.scope || r.amount === null ? "Pick whose it is and type the amount first." : undefined}
+                onClick={() => updateReceipt(r.id, { unchecked: false })}
+              >
+                ✓ Looks right
+              </button>
+            )}
+            {r.scope && <ScopeBadge item={r} />}
             <button className="text-zinc-400 hover:text-rose-600" onClick={() => removeReceipt(r)}>
               Delete
             </button>

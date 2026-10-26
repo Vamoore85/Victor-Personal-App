@@ -93,3 +93,11 @@ test("the ZIP holds each original byte for byte, and gives repeated names a numb
   assert.ok(files["2026/Personal/a.eml"].equals(eml));
   assert.ok(files["2026/Gladiator/ü.jpg"].equals(jpg));
 });
+
+test("a scan you haven't checked stays in Needs review until you check it", () => {
+  const [e] = buildFolders({ receipts: [upload("s1", { unchecked: true })] }, []);
+  assert.equal(e.section, "review");
+  assert.equal(e.why, "Scanned; you haven't checked what was read yet.");
+  const [done] = buildFolders({ receipts: [upload("s1", { unchecked: false })] }, []);
+  assert.equal(done.section, "business");
+});
