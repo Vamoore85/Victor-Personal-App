@@ -274,6 +274,7 @@ export type Receipt = {
   note: string;
   transactionId?: string; // the transaction it backs up
   scope?: Scope;
+  unchecked?: boolean; // scanned, and store/date/amount were read off the photo but you haven't checked them yet
   contentType: string;
   size: number;
   addedAt: string;

@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# receipt reader, copied from node_modules by scripts/copy-ocr.mjs
+/public/ocr/

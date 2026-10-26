@@ -21,5 +21,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!login|trust|api/login|_next/|maverick-logo.png|brand/|maverick-black-beauty.webp|favicon.ico|icon.png|apple-icon.png|robots.txt).*)"],
+  matcher: ["/((?!login|trust|api/login|_next/|maverick-logo.png|brand/|maverick-black-beauty.webp|ocr/|favicon.ico|icon.png|apple-icon.png|robots.txt).*)"],
 };
