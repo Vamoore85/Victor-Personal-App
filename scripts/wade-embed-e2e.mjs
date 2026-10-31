@@ -1,28 +1,21 @@
 // Browser check of Maverick's Wade page against a stand-in for Wade's local frame.
-// It never talks to the real Wade: it serves its own fake on 127.0.0.1:8790, so stop
-// Wade first if it's running on this machine. Needs a built Maverick on BASE
+// The stand-in is a route mock inside this test's own browser context: every
+// request to Wade's fixed origin is answered here, so the real Wade on this Mac
+// is never contacted and never needs stopping. Needs a built Maverick on BASE
 // (default http://localhost:3123) signed in with APP_PASSWORD.
 //   APP_PASSWORD=x npx next start -p 3123 &   then   APP_PASSWORD=x node scripts/wade-embed-e2e.mjs
-import http from "node:http";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 const { chromium } = createRequire(import.meta.url)("playwright"); // the machine-wide Playwright, not a package dependency
 
 const BASE = process.env.BASE || "http://localhost:3123";
 const PARENT = new URL(BASE).origin;
+const WADE = "http://127.0.0.1:8790"; // the fixed production origin, mocked below
 let mode = "ready"; // ready | silent | noack | wrongorigin
 const received = [];
+const unexpected = [];
 
-const fake = http.createServer((req, res) => {
-  if (req.url === "/log" && req.method === "POST") {
-    let b = "";
-    req.on("data", (c) => (b += c));
-    req.on("end", () => { received.push(JSON.parse(b)); res.end(); });
-    return;
-  }
-  if (!req.url.startsWith("/embed/maverick")) { res.statusCode = 404; return res.end(); }
-  res.setHeader("Content-Type", "text/html");
-  res.end(`<!doctype html><body>fake wade (${mode})<script>
+const fakeEmbed = () => `<!doctype html><body>fake wade (${mode})<script>
     const P = ${JSON.stringify(PARENT)}, mode = ${JSON.stringify(mode)};
     if (mode === "ready" || mode === "noack") parent.postMessage({type:"wade-local-state", state:"ready"}, P);
     if (mode === "wrongorigin") parent.postMessage({type:"wade-local-state", state:"ready", chat:"secret"}, P);
@@ -31,12 +24,23 @@ const fake = http.createServer((req, res) => {
       if (mode === "ready" && e.origin === P && e.data && e.data.type === "wade-local-disconnect")
         parent.postMessage({type:"wade-local-state", state:"disconnected"}, P);
     });
-  </script></body>`);
-});
-await new Promise((r) => fake.listen(8790, "127.0.0.1", r));
+  </script></body>`;
 
 const browser = await chromium.launch();
-const page = await browser.newPage();
+const context = await browser.newContext();
+// Anything aimed at Wade's port, on 127.0.0.1 or localhost, stays inside this context.
+await context.route(/^https?:\/\/(127\.0\.0\.1|localhost):8790(\/|$)/, async (route) => {
+  const req = route.request();
+  const url = new URL(req.url());
+  if (url.origin === WADE && url.pathname === "/embed/maverick") return route.fulfill({ contentType: "text/html", body: fakeEmbed() });
+  if (url.origin === WADE && url.pathname === "/log" && req.method() === "POST") {
+    received.push(JSON.parse(req.postData() ?? "null"));
+    return route.fulfill({ status: 204 });
+  }
+  unexpected.push(`${req.method()} ${req.url()}`);
+  return route.fulfill({ status: 404 });
+});
+const page = await context.newPage();
 const state = () => page.getAttribute("[data-testid=wade-panel]", "data-wade-state");
 const waitState = (s, ms = 10000) => page.waitForSelector(`[data-testid=wade-panel][data-wade-state="${s}"]`, { timeout: ms });
 
@@ -101,5 +105,5 @@ await page.waitForURL(/\/login/);
 assert.deepEqual(received.map((r) => r.data), [{ type: "wade-local-disconnect" }]);
 console.log("ok sign-out disconnects Wade first");
 
+assert.deepEqual(unexpected, [], "the page asked Wade's port for nothing but the Maverick embed");
 await browser.close();
-fake.close();
