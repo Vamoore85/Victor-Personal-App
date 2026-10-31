@@ -24,6 +24,7 @@ export const LIFE_AREAS: readonly LifeArea[] = [
   { slug: "accounts", short: "Accounts", group: "work", label: "Accounts", blurb: "Every account by company, with live balances", href: "/accounts" },
   { slug: "logins", short: "Logins", group: "work", label: "Logins", blurb: "Every login by company, locked in your Maverick Vault", href: "/logins" },
   { slug: "emailbills", short: "Email bills", group: "work", label: "Email bills", blurb: "Bills and receipts found in your Gmail, for you to review", href: "/email-bills" },
+  { slug: "wade", short: "Wade", group: "work", label: "Wade", blurb: "Your own Wade from this Mac, inside Maverick", href: "/wade" },
   { slug: "invest", short: "Invest", group: "work", label: "Invest", blurb: "Goals, plus the books and video clips that get you there", href: "/invest" },
   { slug: "projects", short: "Projects", group: "work", label: "Projects", blurb: "Brain Dump inbox, projects, tasks and someday", href: "/projects" },
   { slug: "ideas", short: "Ideas", group: "work", label: "Ideas", blurb: "A free-form place to dump ideas", href: "/ideas" },
