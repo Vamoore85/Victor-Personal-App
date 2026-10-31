@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { cookies } from "next/headers";
+import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import QRCode from "qrcode";
 import { SESSION_COOKIE, rememberedUntil, setupSession, totpSecret, totpUri, validSession } from "@/lib/auth";
@@ -14,13 +15,15 @@ export const metadata: Metadata = { title: "Sign-in & this device" };
 // signed in, so the password alone is never enough to add an authenticator.
 export default function SecurityPage() {
   return (
-    <Suspense>
+    <Suspense fallback={<main className="mx-auto w-full max-w-md px-6 py-12"><p role="status">Loading sign-in settings…</p></main>}>
       <Setup />
     </Suspense>
   );
 }
 
 async function Setup() {
+  // Expiry must be checked for the current request, never in the static shell.
+  await connection();
   const cookie = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!setupSession(cookie)) redirect("/login");
   const done = validSession(cookie);

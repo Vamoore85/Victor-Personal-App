@@ -32,6 +32,11 @@ try {
   }
   assert.equal(ready, true, "Fixture server became ready");
   const full = sessionToken("full");
+  const settings = await call("/security", { cookie: full });
+  const settingsHtml = await settings.text();
+  assert.equal(settings.status, 200);
+  assert.ok(settingsHtml.includes("Remember this Mac for 90 days"), "Settings must actually render its control");
+  assert.ok(!settingsHtml.includes("NEXT_HTTP_ERROR_FALLBACK"), "Settings must not render an error shell");
   const passwordOnly = sessionToken("password");
   const path = "/api/session/remember";
   assert.equal((await call(path)).status, 401, "A new browser remains signed out");

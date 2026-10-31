@@ -48,17 +48,18 @@ export function rememberedSessionToken(now = Date.now()) {
 }
 
 /** Returns no private credential data, and never treats an expired cookie as signed in. */
-export function rememberedUntil(cookie: string | undefined, now = Date.now()): number | null {
+export function rememberedUntil(cookie: string | undefined, now?: number): number | null {
   if (!passwordSet() || !cookie || cookie.length > 512) return null;
   const [version, payload, signature, extra] = cookie.split(".");
   if (version !== "r1" || !payload || !signature || extra !== undefined) return null;
   if (!same(signature, hmac(`maverick-remember-v1:${payload}`).digest("base64url"))) return null;
+  const currentTime = now ?? Date.now();
   try {
     const value = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     if (!value || Object.keys(value).sort().join(",") !== "expiresAt,issuedAt,nonce") return null;
     const { issuedAt, expiresAt, nonce } = value;
     if (!Number.isSafeInteger(issuedAt) || !Number.isSafeInteger(expiresAt)
-      || expiresAt - issuedAt !== REMEMBER_MS || issuedAt > now || expiresAt <= now
+      || expiresAt - issuedAt !== REMEMBER_MS || issuedAt > currentTime || expiresAt <= currentTime
       || typeof nonce !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(nonce)) return null;
     return expiresAt;
   } catch {
