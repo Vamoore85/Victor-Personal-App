@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 // A single-owner lock: a password plus a 6-digit code from an authenticator
 // app. The password lives in the APP_PASSWORD environment variable in Vercel,
@@ -6,14 +6,18 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 // store. Changing the password signs out every device and resets the
 // authenticator, which then has to be scanned again.
 //
-// The browser keeps a cookie holding an HMAC for one of two levels:
+// Existing browser cookies hold an HMAC for one of two levels:
 //   "full"     - password and code; opens the whole app.
 //   "password" - password only (cookies issued before 2-step sign-in existed);
 //                opens just the 2-step setup page, so that device can finish
 //                setting up the authenticator.
+// Explicitly remembered browsers use a unique, signed r1 token with a fixed
+// 90-day server-enforced expiry instead. No other browser receives that token.
 
 export const SESSION_COOKIE = "mp_session";
 export const SESSION_DAYS = 30;
+export const REMEMBER_DAYS = 90;
+const REMEMBER_MS = REMEMBER_DAYS * 24 * 60 * 60 * 1000;
 
 type Level = "full" | "password";
 
@@ -33,8 +37,44 @@ function same(a: string, b: string) {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
+/** A unique, signed session for this browser, with a server-enforced expiry. */
+export function rememberedSessionToken(now = Date.now()) {
+  const payload = Buffer.from(JSON.stringify({
+    issuedAt: now,
+    expiresAt: now + REMEMBER_MS,
+    nonce: randomBytes(16).toString("base64url"),
+  })).toString("base64url");
+  return `r1.${payload}.${hmac(`maverick-remember-v1:${payload}`).digest("base64url")}`;
+}
+
+/** Returns no private credential data, and never treats an expired cookie as signed in. */
+export function rememberedUntil(cookie: string | undefined, now = Date.now()): number | null {
+  if (!passwordSet() || !cookie || cookie.length > 512) return null;
+  const [version, payload, signature, extra] = cookie.split(".");
+  if (version !== "r1" || !payload || !signature || extra !== undefined) return null;
+  if (!same(signature, hmac(`maverick-remember-v1:${payload}`).digest("base64url"))) return null;
+  try {
+    const value = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (!value || Object.keys(value).sort().join(",") !== "expiresAt,issuedAt,nonce") return null;
+    const { issuedAt, expiresAt, nonce } = value;
+    if (!Number.isSafeInteger(issuedAt) || !Number.isSafeInteger(expiresAt)
+      || expiresAt - issuedAt !== REMEMBER_MS || issuedAt > now || expiresAt <= now
+      || typeof nonce !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(nonce)) return null;
+    return expiresAt;
+  } catch {
+    return null;
+  }
+}
+
+/** Legacy password-only sessions may never opt themselves into a remembered full session. */
+export function fullSession(cookie: string | undefined) {
+  if (!passwordSet() || !cookie) return false;
+  return same(cookie, sessionToken("full")) || rememberedUntil(cookie) !== null;
+}
+
 function levelOf(cookie: string | undefined): Level | null {
   if (!passwordSet() || !cookie) return null;
+  if (rememberedUntil(cookie) !== null) return "full";
   if (same(cookie, sessionToken("full"))) return "full";
   if (same(cookie, sessionToken("password"))) return "password";
   return null;
@@ -114,12 +154,12 @@ export function correctCode(attempt: unknown, now = Date.now()) {
   return [step - 1, step, step + 1].some((s) => same(codeAt(s), code));
 }
 
-export function cookieOptions() {
+export function cookieOptions(days = SESSION_DAYS) {
   return {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax" as const,
     path: "/",
-    maxAge: SESSION_DAYS * 24 * 60 * 60,
+    maxAge: days * 24 * 60 * 60,
   };
 }

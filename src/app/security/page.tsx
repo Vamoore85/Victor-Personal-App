@@ -4,10 +4,11 @@ import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import QRCode from "qrcode";
-import { SESSION_COOKIE, setupSession, totpSecret, totpUri, validSession } from "@/lib/auth";
+import { SESSION_COOKIE, rememberedUntil, setupSession, totpSecret, totpUri, validSession } from "@/lib/auth";
 import { SetupForm } from "./SetupForm";
+import { RememberDevice } from "./RememberDevice";
 
-export const metadata: Metadata = { title: "2-step sign-in" };
+export const metadata: Metadata = { title: "Sign-in & this device" };
 
 // Shows the authenticator QR code. Reachable only from a device that's already
 // signed in, so the password alone is never enough to add an authenticator.
@@ -31,29 +32,32 @@ async function Setup() {
       <Link href="/" className="text-sm text-zinc-500 hover:text-brand">
         ← Home
       </Link>
-      <h1 className="mt-4 text-2xl font-semibold tracking-tight">2-step sign-in</h1>
+      <h1 className="mt-4 text-2xl font-semibold tracking-tight">Sign-in &amp; this device</h1>
       <p className="mt-2 text-sm text-zinc-500">
-        Signing in takes your password plus a 6-digit code from an authenticator app on your phone, such as Google Authenticator,
-        Microsoft Authenticator or 1Password.
+        {done ? "Choose how long this browser or installed app stays signed in." : "Use the current Maverick code from your authenticator app. If you've already added Maverick, you don't need to scan the code again."}
       </p>
       {done ? (
         <p className="mt-6 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-400">
-          2-step sign-in is on for this device. To add the app on another phone, scan the code below with it.
+          You are signed in on this browser or app.
         </p>
       ) : (
         <p className="mt-6 rounded-lg bg-ember/10 px-3 py-2 text-sm text-brand">
           One-time setup: scan this code with your authenticator app, then type the 6-digit code it shows.
         </p>
       )}
-      <div className="mt-6 flex flex-col items-center gap-4 rounded-xl border border-zinc-200 p-6 dark:border-zinc-800">
-        <div className="rounded-lg bg-white p-2" dangerouslySetInnerHTML={{ __html: qr }} />
-        <a href={totpUri()} className="text-sm underline hover:text-brand">
-          On this phone? Tap to add it to your authenticator app
-        </a>
-        <p className="text-center text-xs text-zinc-500">
-          Or enter this key by hand: <span className="font-mono text-zinc-700 dark:text-zinc-300">{secret}</span>
-        </p>
-      </div>
+      {done && <RememberDevice initialUntil={rememberedUntil(cookie)} />}
+      <details open={!done} className="mt-6">
+        {done && <summary className="cursor-pointer text-sm underline">Add the authenticator on another phone</summary>}
+        <div className="mt-4 flex flex-col items-center gap-4 rounded-xl border border-zinc-200 p-6 dark:border-zinc-800">
+          <div className="rounded-lg bg-white p-2" dangerouslySetInnerHTML={{ __html: qr }} />
+          <a href={totpUri()} className="text-sm underline hover:text-brand">
+            On this phone? Tap to add it to your authenticator app
+          </a>
+          <p className="text-center text-xs text-zinc-500">
+            Or enter this key by hand: <span className="font-mono text-zinc-700 dark:text-zinc-300">{secret}</span>
+          </p>
+        </div>
+      </details>
       {!done && <SetupForm />}
     </main>
   );
