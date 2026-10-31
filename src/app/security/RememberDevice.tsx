@@ -34,7 +34,7 @@ export function RememberDevice({ initialUntil }: { initialUntil: number | null }
       {until ? (
         <>
           <p role="status" className="mt-4 font-medium text-emerald-700 dark:text-emerald-400">
-            This browser or app is remembered until {new Date(until).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}.
+            This browser or app is remembered until {new Date(until).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "America/New_York" })}.
           </p>
           <SignOut className="mt-3 text-sm underline">Forget this browser and sign out</SignOut>
         </>

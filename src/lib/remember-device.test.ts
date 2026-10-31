@@ -79,3 +79,14 @@ test("standard existing full sessions still work without silently remembering th
   assert.deepEqual(deviceStatus(token), { rememberedUntil: null });
   assert.equal(cookieOptions().maxAge, 30 * 86_400);
 });
+
+test("missing and legacy cookies never read the clock during static rendering", () => {
+  fixture();
+  const originalNow = Date.now;
+  try {
+    Date.now = () => { throw new Error("A request-time clock must not be read for this cookie"); };
+    assert.equal(rememberedUntil(undefined), null);
+    assert.equal(rememberedUntil(sessionToken("full")), null);
+    assert.equal(validSession(sessionToken("full")), true);
+  } finally { Date.now = originalNow; }
+});
