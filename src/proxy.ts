@@ -8,6 +8,9 @@ export function proxy(request: NextRequest) {
   // These exact endpoints authenticate Vercel's scheduler with CRON_SECRET in their handlers.
   // It returns counts only and never accepts an owner-session bypass for any other route.
   if (["/api/gmail/auto-scan","/api/gmail/history-scan"].includes(request.nextUrl.pathname)) return NextResponse.next();
+  // Wade on Victor's Mac authenticates these with its own token in their handlers; starting a link reads nothing,
+  // and the other two answer only for a token Victor approved from a full sign-in.
+  if (["/api/wade/link/start","/api/wade/link/status","/api/wade/money"].includes(request.nextUrl.pathname)) return NextResponse.next();
   const cookie = request.cookies.get(SESSION_COOKIE)?.value;
   if (validSession(cookie)) return NextResponse.next();
   const { pathname, search } = request.nextUrl;
