@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { disconnectOutcome, isStateMessage, readFrameMessage, sendDisconnect, WADE_FRAME_URL, WADE_ORIGIN } from "./protocol";
+import { disconnectOutcome, isStateMessage, readFrameMessage, sendDisconnect, WADE_FRAME_ALLOW, WADE_FRAME_URL, WADE_ORIGIN } from "./protocol";
 
 const frame = { name: "the frame this page made" };
 const msg = (data: unknown, origin = WADE_ORIGIN, source: unknown = frame) => ({ origin, source, data });
@@ -74,4 +74,12 @@ test("the only thing Maverick sends is the bare disconnect, to Wade's exact orig
   assert.deepEqual(Object.keys(sent[0][0] as object), ["type"]);
   assert.equal(sendDisconnect(null), false);
   assert.equal(sendDisconnect({ postMessage: () => { throw new Error("closed"); } }), false);
+});
+
+test("the frame names every Chrome local-access permission, only for Wade's exact address", () => {
+  assert.equal(
+    WADE_FRAME_ALLOW,
+    "local-network-access http://127.0.0.1:8790; local-network http://127.0.0.1:8790; loopback-network http://127.0.0.1:8790; autoplay http://127.0.0.1:8790",
+  );
+  assert.ok(!WADE_FRAME_ALLOW.includes("*"));
 });

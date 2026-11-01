@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
         source: "/wade",
         headers: [
           { key: "Content-Security-Policy", value: "frame-src 'self' http://127.0.0.1:8790; frame-ancestors 'self'" },
-          { key: "Permissions-Policy", value: 'loopback-network=(self "http://127.0.0.1:8790"), autoplay=(self "http://127.0.0.1:8790")' },
+          { key: "Permissions-Policy", value: 'local-network-access=(self "http://127.0.0.1:8790"), local-network=(self "http://127.0.0.1:8790"), loopback-network=(self "http://127.0.0.1:8790"), autoplay=(self "http://127.0.0.1:8790")' },
           { key: "Referrer-Policy", value: "no-referrer" },
         ],
       },

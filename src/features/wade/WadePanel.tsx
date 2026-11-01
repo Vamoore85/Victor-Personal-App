@@ -9,8 +9,8 @@ import {
   STATE_TEXT,
   WADE_APP_URL,
   WADE_DISCONNECT_WAIT_MS,
+  WADE_FRAME_ALLOW,
   WADE_FRAME_URL,
-  WADE_ORIGIN,
   WADE_TIMEOUT_MS,
   type FrameState,
   type WadeState,
@@ -156,7 +156,7 @@ export function WadePanel() {
             src={WADE_FRAME_URL}
             title="Wade, private workspace on this Mac"
             referrerPolicy="no-referrer"
-            allow={`loopback-network ${WADE_ORIGIN}; autoplay ${WADE_ORIGIN}`}
+            allow={WADE_FRAME_ALLOW}
             className="h-[75vh] min-h-[480px] w-full bg-white"
             onError={() => setState("unavailable")}
           />
