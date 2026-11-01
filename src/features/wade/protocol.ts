@@ -12,6 +12,13 @@
 export const WADE_ORIGIN = "http://127.0.0.1:8790";
 export const WADE_FRAME_URL = `${WADE_ORIGIN}/embed/maverick`;
 export const WADE_APP_URL = "wade://open";
+/**
+ * Chrome asks before a website may show anything served by this Mac. That permission has been named
+ * local-network-access, local-network and loopback-network in different Chrome versions, so the frame
+ * names all three (unknown names are ignored) and every recent Chrome can ask.
+ */
+export const LOCAL_ACCESS_FEATURES = ["local-network-access", "local-network", "loopback-network"] as const;
+export const WADE_FRAME_ALLOW = [...LOCAL_ACCESS_FEATURES, "autoplay"].map((f) => `${f} ${WADE_ORIGIN}`).join("; ");
 /** How long to wait for Wade's first status before calling it unavailable. */
 export const WADE_TIMEOUT_MS = 8000;
 /** How long Disconnect or sign-out waits for Wade to confirm. */
