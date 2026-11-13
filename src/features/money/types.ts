@@ -90,6 +90,9 @@ export type Transaction = {
   // accounts, so they don't count as income or spending.
   transferId?: string;
   plaidId?: string; // Plaid's id for transactions that came from a connected bank
+  // The bank connection (BankLink id) that delivered it. Two connections to the same bank give the same
+  // transaction different Plaid ids, so this is how a copy from the other connection is recognized.
+  plaidLink?: string;
   categoryLocked?: boolean; // you picked this category by hand; rules and syncs leave it alone
   docId?: string; // came from an uploaded document (see DocImport)
 };
