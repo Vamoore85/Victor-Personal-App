@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Card, buttonClass, ghostButtonClass, inputClass } from "@/features/money/ui";
 import { formatSize } from "@/lib/files";
 import { ORGANIZER_EMAIL, SELF_REPORTED, addDays, dateLabel, easternToday, hasStarted, timeLabel, type Kind, type Meeting, type MeetingData, type OrganizerConfirmation, type Rule } from "./model";
+import { meetingRecord } from "./record-fields";
 import { AUDIO_ACCEPT, MAX_AUDIO_BYTES, MAX_AUDIO_MB, NO_AUDIO, PART_BYTES, TRANSCRIPT_FAILED, extensionOk } from "./audio";
 
 /*
@@ -12,7 +13,7 @@ import { AUDIO_ACCEPT, MAX_AUDIO_BYTES, MAX_AUDIO_MB, NO_AUDIO, PART_BYTES, TRAN
  * the screen keeps the last saved copy.
  */
 
-type Tab = "check" | "upcoming" | "history" | "records" | "settings";
+type Tab = "check" | "upcoming" | "history" | "meetingRecords" | "records" | "settings";
 type SaveResult = { data: MeetingData; added?: number; updated?: number; cancelled?: number };
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const KINDS: Kind[] = ["AA", "IOP", "Other"];
@@ -83,6 +84,7 @@ export function Tracker() {
       upcoming: active.filter((m) => m.state === "scheduled" && !hasStarted(m, now)).sort(byDate),
       history: active.filter((m) => m.state !== "scheduled").sort(byDate).reverse(),
       records: data.meetings.filter((m) => m.evidence.length || m.confirmations.length).sort(byDate).reverse(),
+      meetingRecords: [...attended].sort(byDate).reverse(),
       review: data.needsReview.filter((c) => !c.dismissedAt),
       month: attended.filter((m) => m.date.slice(0, 7) === today.slice(0, 7) && m.kind === "AA").length,
       last30: attended.filter((m) => m.date > addDays(today, -30) && m.kind === "AA").length,
@@ -93,7 +95,7 @@ export function Tracker() {
   if (!data || !lists || !now) return <p role="status" className="text-zinc-500">Loading your meetings…</p>;
 
   const next = lists.upcoming[0];
-  const tabs: [Tab, string, number?][] = [["check", "Needs check", lists.check.length], ["upcoming", "Upcoming", lists.upcoming.length], ["history", "History"], ["records", "Records & reports", lists.review.length], ["settings", "Settings"]];
+  const tabs: [Tab, string, number?][] = [["check", "Needs check", lists.check.length], ["upcoming", "Upcoming", lists.upcoming.length], ["history", "History"], ["meetingRecords", "Meeting records", lists.meetingRecords.length], ["records", "Records & reports", lists.review.length], ["settings", "Settings"]];
   const shared = { data, busy, run, now };
 
   return (
@@ -137,6 +139,7 @@ export function Tracker() {
       {tab === "upcoming" && <List empty="No planned meetings. Add one, or turn on a recurring plan in Settings." meetings={lists.upcoming} {...shared} />}
       {tab === "history" && <List empty="No answers yet. Meetings you mark attended or did not attend show up here." meetings={lists.history} {...shared} />}
       {tab === "records" && <><ReportBuilder data={data} now={now} /><NeedsReview items={lists.review} {...shared} /><List empty="No supporting records attached yet. Open a meeting and attach a slip or photo." meetings={lists.records} {...shared} /></>}
+      {tab === "meetingRecords" && <MeetingRecords meetings={lists.meetingRecords} data={data} />}
       {tab === "settings" && <Settings {...shared} />}
     </div>
   );
@@ -491,11 +494,11 @@ function AudioPanel({ m, busy, run }: { m: Meeting; busy: boolean; run: Shared["
   );
 }
 
-type FormValues = { date: string; time: string; name: string; location: string; format: string; minutes: string; kind: Kind; topic: string; note: string };
+type FormValues = { date: string; time: string; name: string; location: string; format: string; minutes: string; kind: Kind; topic: string; takeaway: string; note: string };
 function MeetingForm({ data, busy, initial, submit, onSubmit }: { data: MeetingData; busy: boolean; initial: Partial<Meeting>; submit: string; onSubmit: (f: FormValues) => void }) {
   const [f, setF] = useState<FormValues>({
     date: initial.date ?? "", time: initial.time ?? "", name: initial.name ?? "", location: initial.location ?? "", format: initial.format ?? "in-person",
-    minutes: initial.minutes ? String(initial.minutes) : "", kind: initial.kind ?? "AA", topic: initial.topic ?? "", note: initial.note ?? "",
+    minutes: initial.minutes ? String(initial.minutes) : "", kind: initial.kind ?? "AA", topic: initial.topic ?? "", takeaway: initial.takeaway ?? "", note: initial.note ?? "",
   });
   const set = (k: keyof FormValues) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value }));
   const names = [...new Set([...data.rules.map((r) => r.name), ...data.meetings.map((m) => m.name)])].slice(0, 50);
@@ -515,6 +518,7 @@ function MeetingForm({ data, busy, initial, submit, onSubmit }: { data: MeetingD
       </div>
       <label className={`${field} sm:col-span-2`}>Topic (optional)<input className={input} value={f.topic} onChange={set("topic")} list="aa-topics" maxLength={300} /></label>
       <datalist id="aa-topics">{data.topics.map((t) => <option key={t} value={t} />)}</datalist>
+      <label className={`${field} sm:col-span-2`}>Takeaway (shown on this meeting&apos;s record)<textarea className={`${input} min-h-20`} value={f.takeaway} onChange={set("takeaway")} maxLength={2000} /></label>
       <label className={`${field} sm:col-span-2`}>Private note (kept out of reports)<textarea className={`${input} min-h-20`} value={f.note} onChange={set("note")} maxLength={4000} /></label>
       <div className="sm:col-span-2"><button className={`${buttonClass} min-h-11 lg:min-h-9`} disabled={busy}>{busy ? "Saving…" : submit}</button></div>
     </form>
@@ -643,6 +647,51 @@ function Settings({ data, busy, run, now }: Shared) {
           <div className="sm:col-span-2"><button className={`${buttonClass} min-h-11 lg:min-h-9`} disabled={busy || !file}>Import calendar</button></div>
         </form>
       </Card>
+    </div>
+  );
+}
+
+/** Each attended meeting as its own one-page record, with PDF and Word downloads. */
+function MeetingRecords({ meetings, data }: { meetings: Meeting[]; data: MeetingData }) {
+  const [state, setState] = useState<{ busy?: string; error?: string; done?: string }>({});
+  if (!meetings.length) return <p className="rounded-xl border border-dashed border-zinc-300 p-6 text-center text-zinc-500 dark:border-zinc-700">No attended meetings yet. Each meeting you mark “I attended” gets its own record here.</p>;
+  async function get(m: Meeting, format: "pdf" | "docx") {
+    setState({ busy: `${m.id}:${format}` });
+    try {
+      const res = await fetch(`/api/aa-meetings/record?id=${encodeURIComponent(m.id)}&format=${format}`, { cache: "no-store" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Couldn't make the file.");
+      const name = `${meetingRecord(m, data).fileBase}.${format}`;
+      download(await res.blob(), name);
+      setState({ done: `Downloaded ${name}.` });
+    } catch (e) { setState({ error: e instanceof TypeError ? "Couldn't reach Maverick." : (e as Error).message }); }
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      <div aria-live="polite">
+        {state.error && <p role="alert" className="rounded-xl bg-rose-500/10 p-3 text-sm">{state.error}</p>}
+        {state.done && <p role="status" className="text-sm text-zinc-600 dark:text-zinc-400">{state.done}</p>}
+      </div>
+      <ul className="flex flex-col gap-3">
+        {meetings.map((m) => {
+          const r = meetingRecord(m, data);
+          return (
+            <li key={m.id}>
+              <article className="rounded-xl border border-zinc-200 bg-surface p-4 sm:p-5 dark:border-zinc-800">
+                <h3 className="text-lg font-semibold">{r.title}</h3>
+                <dl className="mt-3 grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-[11rem_1fr]">
+                  {r.rows.map(([k, v]) => <div key={k} className="contents"><dt className="font-medium">{k}</dt><dd className="mb-1 break-words text-zinc-700 sm:mb-0 dark:text-zinc-300">{v}</dd></div>)}
+                </dl>
+                <h4 className="mt-4 font-semibold">Takeaway</h4>
+                <p className="mt-1 text-sm leading-relaxed">{r.takeaway || <span className="text-zinc-500">No takeaway yet. Add one with Edit on this meeting.</span>}</p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button className={`${buttonClass} min-h-11 lg:min-h-9`} disabled={!!state.busy} onClick={() => get(m, "pdf")}>{state.busy === `${m.id}:pdf` ? "Preparing…" : "Download PDF"}</button>
+                  <button className={`${ghostButtonClass} min-h-11 lg:min-h-9`} disabled={!!state.busy} onClick={() => get(m, "docx")}>{state.busy === `${m.id}:docx` ? "Preparing…" : "Download Word"}</button>
+                </div>
+              </article>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

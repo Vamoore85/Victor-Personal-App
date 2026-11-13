@@ -8,6 +8,8 @@ import { MAX_AUDIO_BYTES, MAX_AUDIO_MB, MAX_PARTS, PART_BYTES, confirmationFileK
 import { calendarCancellations, importCalendar } from "./calendar";
 import { MAX_EVIDENCE_BYTES, MAX_FILES_PER_MEETING, fileKey, safeName, sniffType } from "./evidence";
 import { ReportError, buildReport, parseOptions, reportCsv, reportPdf, type Report } from "./report";
+import { meetingRecord } from "./record-fields";
+import { recordDocx, recordPdf } from "./record";
 import { DOC_KEY, TooLarge, boundedBody, readMeetings, updateMeetings, type Store } from "./server";
 
 /*
@@ -432,4 +434,23 @@ export async function downloadReport(req: Request, store: Store, now = new Date(
     if (e instanceof ReportError) return json({ error: e.message }, 400);
     console.error("aa report pdf", e); return json({ error: "Couldn't build the PDF. Please try again." }, 500);
   }
+}
+
+/** GET ?id=<meeting id>&format=pdf|docx: one meeting's record, for download. */
+export async function downloadRecord(req: Request, store: Store) {
+  const denied = guard(req, store, false); if (denied) return denied;
+  const q = new URL(req.url).searchParams;
+  const format = q.get("format") ?? "pdf";
+  if (format !== "pdf" && format !== "docx") return json({ error: "Choose PDF or Word." }, 400);
+  let data: MeetingData;
+  try { data = await readMeetings(store); }
+  catch (e) { console.error("aa record load", e); return json({ error: "Couldn't load meetings. Please try again." }, 502); }
+  const m = data.meetings.find((x) => x.id === q.get("id"));
+  if (!m) return json({ error: "Meeting not found." }, 404);
+  const r = meetingRecord(m, data);
+  const bytes = format === "pdf" ? await recordPdf(r) : await recordDocx(r);
+  const type = format === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const name = `${r.fileBase}.${format}`;
+  return new Response(new Uint8Array(bytes), { headers: { ...NO_STORE, "Content-Type": type, "X-Content-Type-Options": "nosniff",
+    "Content-Disposition": `attachment; filename="${name.replace(/[^\x20-\x7e]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(name)}` } });
 }

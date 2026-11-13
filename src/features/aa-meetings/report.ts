@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { ORGANIZER_EMAIL, SELF_REPORTED, TIME_ZONE, dateLabel, reportMeetings, timeLabel, type Kind, type MeetingData } from "./model";
+import { publicLocation } from "./record-fields";
 
 /*
  * The court attendance report. It lists only meetings the owner explicitly
@@ -35,8 +36,7 @@ export function parseOptions(q: URLSearchParams): ReportOptions {
   return { from: q.get("from") ?? "", through: q.get("through") ?? "", kinds: kinds.length ? kinds : ["AA"], includeTopics: q.get("topics") === "1", includeNotes: q.get("notes") === "1" };
 }
 
-// An online meeting's join link or passcode never goes into a report.
-const publicLocation = (s: string) => (/https?:|www\.|zoom\.|teams\.|meet\.|pwd=|passcode|password/i.test(s) ? "Online (link withheld)" : s);
+
 
 export function buildReport(data: MeetingData, rev: number, o: ReportOptions, now = new Date()) {
   let n = 0, e = 0;
