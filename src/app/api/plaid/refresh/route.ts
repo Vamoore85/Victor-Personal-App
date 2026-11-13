@@ -4,6 +4,7 @@ import { credsFrom, handle, PlaidError, unseal } from "@/lib/plaid-server";
 import { pullChanges } from "@/lib/plaid-sync";
 import { applySync, type SyncResult } from "@/features/money/plaid-apply";
 import { cleanAccounts } from "@/features/money/accounts-fix";
+import { rollBillsForward } from "@/features/money/bill-intel";
 import type { BankLink } from "@/features/money/types";
 
 /*
@@ -81,7 +82,8 @@ export const POST = handle(async (body) => {
       if (!r.ok) next = { ...next, bankLinks: next.bankLinks.map((x): BankLink => (x.id === r.id ? { ...x, error: r.error, errorCode: r.code } : x)) };
     }
     // A bank connected twice gives the same accounts twice: fold them into one before saving.
-    return cleanAccounts(next).data;
+    // Then bills whose date has gone by (autopay, or paid per the new bank history) move on to their next date.
+    return rollBillsForward(cleanAccounts(next).data).data;
   }).catch(dbFailed);
 
   // Counts and codes only, for the hosting's logs.

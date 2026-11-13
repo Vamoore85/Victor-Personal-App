@@ -479,6 +479,16 @@ export function confirmFinding(d: MoneyData, id: string, newId: () => string): M
   if (f.direction === "in") return { ...d, recurring: d.recurring.map((x) => (x.id === id ? { ...x, status: "confirmed" } : x)) };
   const e = effective(f);
   const nextDue = e.nextDate ?? stepCadence(e.cadence === "irregular" ? "monthly" : e.cadence, f.usualDay, f.lastDate) ?? todayYmd();
+  // Already in Bills (from the workbook, an email or typed in): tie the finding to that bill instead of adding a second one.
+  const have = matchingBill(d.bills, e.scope, e.name, e.amount, d.recurring, f.id);
+  if (have) {
+    const linked: Bill = { ...have, recurringId: f.id, accountId: have.accountId || f.accountIds[0] || "", nextDue: have.nextDue < todayYmd() && nextDue > have.nextDue ? nextDue : have.nextDue };
+    return {
+      ...d,
+      bills: d.bills.map((b) => (b.id === have.id ? linked : b)),
+      recurring: d.recurring.map((x) => (x.id === id ? { ...x, status: "confirmed", billId: have.id } : x)),
+    };
+  }
   const bill: Bill = {
     id: newId(),
     name: e.name,
@@ -678,4 +688,75 @@ export function briefingText(kind: ReportKind, reports: BucketReport[], fmt: (n:
     for (const l of r.lines.filter((x) => x.status === "scheduled")) out.push(`  ${l.date}  ${l.name}  ${fmt(l.amount)}${l.overdue ? "  (past due)" : ""}`);
   }
   return out.join("\n");
+}
+
+/* ---------------- Keeping bills single and current ---------------- */
+
+// Names one company's charges go by on different statements and emails.
+const BILL_ALIASES: Record<string, string> = { chatgpt: "openai" };
+const nameWords = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w && !["the", "inc", "llc", "co", "com"].includes(w))
+    .map((w) => BILL_ALIASES[w] ?? w);
+const closeAmount = (a: number, b: number) => Math.abs(a - b) <= Math.max(2, 0.1 * Math.max(a, b));
+
+/**
+ * The bill you already have for this payee in this company: the same name, or
+ * the same first word (ChatGPT and OpenAI count as one) at about the same
+ * amount. A bill already tied to a different bank finding is someone else's
+ * (e.g. separate Prime Video channels) and never matches.
+ */
+export function matchingBill(bills: Bill[], scope: Scope, name: string, amount: number, findings: RecurringFinding[] = [], findingId?: string): Bill | undefined {
+  const w = nameWords(name);
+  const live = new Set(findings.map((f) => f.id));
+  return bills.find((b) => {
+    if ((b.scope ?? "personal") !== scope) return false;
+    if (b.recurringId && b.recurringId !== findingId && live.has(b.recurringId)) return false;
+    const v = nameWords(b.name);
+    if (v.join(" ") === w.join(" ")) return true;
+    return !!v[0] && v[0] === w[0] && closeAmount(b.amount, amount);
+  });
+}
+
+/** Whether a bank payment looks like this bill: same payee word, about the same amount, paid out of its company. */
+function paysBill(t: Transaction, b: Bill, scopeOf: Map<string, Scope>) {
+  if (t.kind !== "expense" || t.transferId) return false;
+  if (b.accountId ? t.accountId !== b.accountId : (scopeOf.get(t.accountId) ?? "personal") !== (b.scope ?? "personal")) return false;
+  if (!closeAmount(t.amount, b.amount)) return false;
+  const first = nameWords(b.name)[0];
+  return !!first && nameWords(merchantKey(t.description) || t.description).includes(first);
+}
+
+/**
+ * Moves each repeating bill whose next date has gone by on to its next date:
+ * an autopay bill always (it came out of the account), any other bill only for
+ * the dates a matching bank payment covers. A bill nobody has paid stays past
+ * due, so it still shows as overdue. Before this, only "Mark paid" and bills
+ * tied to a bank finding ever moved on, so workbook, email and typed-in bills
+ * stuck on old dates.
+ */
+export function rollBillsForward(d: MoneyData, today = todayYmd()): { data: MoneyData; moved: number } {
+  const scopeOf = new Map(d.accounts.map((a) => [a.id, a.scope ?? ("personal" as Scope)]));
+  let moved = 0;
+  const bills = d.bills.map((b) => {
+    if (b.frequency === "once" || !b.nextDue || b.nextDue >= today) return b;
+    const paid = d.transactions.filter((t) => paysBill(t, b, scopeOf)).map((t) => t.date).sort();
+    const lastPaid = paid.at(-1) ?? "";
+    let next = b.nextDue;
+    for (let guard = 0; next < today && guard < 120; guard++) {
+      const covered = b.autopay || lastPaid >= addDays(next, -5);
+      if (!covered) break;
+      const step = nextDueAfter(b, next);
+      if (!step) break;
+      next = step;
+    }
+    if (next === b.nextDue) return b;
+    moved++;
+    return { ...b, nextDue: next };
+  });
+  return moved ? { data: { ...d, bills }, moved } : { data: d, moved: 0 };
 }

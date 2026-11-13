@@ -20,7 +20,43 @@ export const ACCOUNT_RULES = 4;
 export const accountLabel = (a: { name: string; nickname?: string }) => a.nickname || a.name;
 
 const debt = (a: Account) => a.type === "credit" || a.type === "loan";
-const txnKey = (t: Transaction) => `${t.date}|${t.amount}|${t.kind}|${t.description}`;
+
+/**
+ * Folding one account's history into another without counting anything twice.
+ * A bank-feed record matches a bank-feed record of the same day, amount and
+ * direction even when the wording differs (one connection says "Green Valley
+ * Market", another "PIN GREEN VALLEY MARKE…"); anything else must match exactly.
+ * Each record already on the kept account stands for one copy at most, so
+ * several real same-day charges of one amount all survive.
+ */
+export function historyFolder(onKept: Transaction[]) {
+  const loose = (accountId: string, t: Transaction) => `${accountId}|${t.date}|${t.amount.toFixed(2)}|${t.kind}`;
+  const strict = (accountId: string, t: Transaction) => `${loose(accountId, t)}|${t.description}`;
+  const have = new Map<string, number>(); // records on the kept account, by key
+  const used = new Map<string, number>(); // how many of those each copy account has matched already
+  const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
+  const add = (t: Transaction, accountId: string) => {
+    if (t.plaidId) bump(have, `bank|${loose(accountId, t)}`);
+    bump(have, `exact|${strict(accountId, t)}`);
+  };
+  for (const t of onKept) add(t, t.accountId);
+  const take = (from: string, k: string) => {
+    const u = `${from}>${k}`;
+    if ((used.get(u) ?? 0) >= (have.get(k) ?? 0)) return false;
+    bump(used, u);
+    return true;
+  };
+  /** True when `t`, moving onto account `to`, is already there (it is then dropped). */
+  return (t: Transaction, to: string) => {
+    if (take(t.accountId, `exact|${strict(to, t)}`)) {
+      if (t.plaidId) bump(used, `${t.accountId}>bank|${loose(to, t)}`); // that kept record is spoken for
+      return true;
+    }
+    if (t.plaidId && take(t.accountId, `bank|${loose(to, t)}`)) return true;
+    add(t, to); // a later copy (from a third connection) can match this one
+    return false;
+  };
+}
 
 /** Accounts you haven't given a company yet are left out of every company's totals. */
 export const isAssigned = (a: Account | undefined) => !!a && !a.needsEntity;
@@ -68,8 +104,7 @@ export function dedupeAccounts(d: MoneyData): { data: MoneyData; merged: number 
   if (!into.size) return { data: d, merged: 0 };
 
   // History moves onto the kept record; the same transaction seen through two connections is kept once.
-  const seen = new Map<string, Set<string>>();
-  for (const t of d.transactions) if (!into.has(t.accountId)) (seen.get(t.accountId) ?? seen.set(t.accountId, new Set()).get(t.accountId)!).add(txnKey(t));
+  const already = historyFolder(d.transactions.filter((t) => !into.has(t.accountId)));
   const transactions: Transaction[] = [];
   for (const t of d.transactions) {
     const to = into.get(t.accountId);
@@ -77,9 +112,7 @@ export function dedupeAccounts(d: MoneyData): { data: MoneyData; merged: number 
       transactions.push(t);
       continue;
     }
-    const s = seen.get(to.id) ?? seen.set(to.id, new Set()).get(to.id)!;
-    if (s.has(txnKey(t))) continue;
-    s.add(txnKey(t));
+    if (already(t, to.id)) continue;
     transactions.push({ ...t, accountId: to.id });
   }
   const re = (id: string) => into.get(id)?.id ?? id;
