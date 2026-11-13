@@ -32,6 +32,7 @@ const PATHS: Record<string, string> = {
   accounts: "M3 10l9-6 9 6M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18",
   plug: "M9 3v5M15 3v5M7 8h10v4a5 5 0 0 1-10 0zM12 17v4",
   wade: "M4 5h16v11H9l-5 4zM8 9h8M8 12h5",
+  aameetings: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7l-4 9M12 7l4 9M9.3 13h5.4",
   reports: "M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7",
 };
 
