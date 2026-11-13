@@ -83,3 +83,35 @@ test("an empty report or a missing name cannot produce a misleading PDF", async 
   const data = sample(); data.profile.name = "";
   await assert.rejects(() => reportPdf(buildReport(data, 1, opts())), /name/);
 });
+
+// Every piece of text must sit inside the printable area: above the footer and within the margins.
+async function textPositions(bytes: Uint8Array) {
+  const pdf = await PDFDocument.load(bytes);
+  const out: { page: number; y: number; text: string }[] = [];
+  pdf.getPages().forEach((page, i) => {
+    const contents = page.node.Contents();
+    const streams = contents && "asArray" in contents ? contents.asArray() : [contents];
+    for (const ref of streams) {
+      const obj = pdf.context.lookup(ref as never);
+      if (!(obj instanceof PDFRawStream)) continue;
+      const s = inflateSync(obj.contents).toString("latin1");
+      for (const m of s.matchAll(/1 0 0 1 ([\d.-]+) ([\d.-]+) Tm\s*<([0-9A-Fa-f]+)>\s*Tj/g)) out.push({ page: i, y: Number(m[2]), text: Buffer.from(m[3], "hex").toString("latin1") });
+    }
+  });
+  return { pdf, out };
+}
+
+test("a maximum-length private note splits across pages instead of running past the footer", async () => {
+  const data = sample();
+  const note = Array.from({ length: 400 }, (_, i) => `word${i}`).join(" ").slice(0, 4000);
+  data.meetings[0].note = note; data.meetings[0].topic = "T".repeat(10) + " " + "topic ".repeat(45);
+  data.profile.reportTitle = "A very long report title ".repeat(6).trim();
+  data.profile.name = "Sample Owner With An Unusually Long Name ".repeat(3).trim();
+  const { pdf, out } = await textPositions(await reportPdf(buildReport(data, 1, opts({ includeNotes: true, includeTopics: true }))));
+  assert.ok(pdf.getPageCount() > 1, "the note continues on another page");
+  const footer = out.filter((t) => t.y === 26);
+  assert.equal(footer.filter((t) => /Page \d+ of \d+/.test(t.text)).length, pdf.getPageCount(), "every page shows its page count");
+  for (const t of out.filter((t) => t.y !== 26)) assert.ok(t.y >= 60, `text above the footer: "${t.text.slice(0, 30)}" at y=${t.y}`);
+  assert.match(out.map((t) => t.text).join(" "), /\(continued\)/);
+  assert.match(out.map((t) => t.text).join(" "), /word399/, "the whole note is printed");
+});

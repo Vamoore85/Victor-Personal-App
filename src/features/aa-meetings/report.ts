@@ -152,14 +152,21 @@ export async function reportPdf(r: Report) {
   for (const row of r.rows) {
     const cells = [dateLabel(row.date), timeLabel(row.time) || "-", `${row.name}${row.kind !== "AA" ? ` (${row.kind})` : ""}${row.format === "online" ? " - online" : ""}`, row.location || "-", row.minutes == null ? "-" : String(row.minutes), row.basis]
       .map((c, i) => wrap(c, font, 8.5, cols[i].w - 6));
-    const extra = [row.topic ? `Topic: ${row.topic}` : "", row.note ? `Private note: ${row.note}` : "", `Owner confirmed attendance ${row.confirmedAt}`].filter(Boolean)
-      .flatMap((s) => wrap(s, font, 7.5, W - 2 * M - cols[0].w));
+    const extra = [`Owner confirmed attendance ${row.confirmedAt}`, row.topic ? `Topic: ${row.topic}` : "", row.note ? `Private note: ${row.note}` : ""].filter(Boolean)
+      .flatMap((s) => wrap(s, font, 8.5, W - 2 * M - cols[0].w));
     const tall = Math.max(...cells.map((c) => c.length));
-    if (ensure(tall * 11 + extra.length * 9.5 + 6)) header();
+    // The row's cells and its first detail line stay together; longer topics or notes continue on the next page.
+    if (ensure(tall * 11 + 11 + 6)) header();
     let x = M;
     cells.forEach((lines, i) => { lines.forEach((l, j) => page.drawText(l, { x, y: y - 9 - j * 11, size: 8.5, font, color: ink })); x += cols[i].w; });
     y -= tall * 11;
-    extra.forEach((l) => { page.drawText(l, { x: M + cols[0].w, y: y - 7.5, size: 7.5, font, color: muted }); y -= 9.5; });
+    for (const l of extra) {
+      if (ensure(11)) {
+        header();
+        page.drawText(wrap(`${dateLabel(row.date)} ${row.name} (continued)`, bold, 8.5, W - 2 * M)[0], { x: M, y: y - 9, size: 8.5, font: bold, color: ink }); y -= 12;
+      }
+      page.drawText(l, { x: M + cols[0].w, y: y - 8.5, size: 8.5, font, color: muted }); y -= 11;
+    }
     y -= 3; page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.4, color: rule }); y -= 3;
   }
 
@@ -178,6 +185,18 @@ export async function reportPdf(r: Report) {
   }
 
   const pages = doc.getPages();
-  pages.forEach((p, i) => p.drawText(winAnsi(`${r.title} - ${r.name || "Owner"} - ${r.from} to ${r.through} - Page ${i + 1} of ${pages.length}`), { x: M, y: 26, size: 7.5, font, color: muted }));
+  // One footer line: the page count always shows, and a long title or name is shortened to fit.
+  const fit = (text: string, width: number) => {
+    let t = winAnsi(text);
+    if (font.widthOfTextAtSize(t, 8) <= width) return t;
+    while (t.length > 1 && font.widthOfTextAtSize(`${t}...`, 8) > width) t = t.slice(0, -1);
+    return `${t.trimEnd()}...`;
+  };
+  pages.forEach((p, i) => {
+    const right = `${r.from} to ${r.through} - Page ${i + 1} of ${pages.length}`;
+    const rw = font.widthOfTextAtSize(right, 8);
+    p.drawText(fit(`${r.title} - ${r.name || "Owner"}`, W - 2 * M - rw - 12), { x: M, y: 26, size: 8, font, color: muted });
+    p.drawText(right, { x: W - M - rw, y: 26, size: 8, font, color: muted });
+  });
   return doc.save();
 }
