@@ -45,6 +45,8 @@ export function MoneyAccess() {
 
   const waiting = code ? links?.find((l) => l.userCode === code && l.status === "pending") : undefined;
   const active = (links ?? []).filter((l) => l.status === "approved");
+  // Requests Wade/Raven started, shown even when the page was opened without ?code= so Victor can still compare and approve.
+  const pending = (links ?? []).filter((l) => l.status === "pending" && l.userCode !== code);
 
   return (
     <div className="flex flex-col gap-4">
@@ -64,6 +66,24 @@ export function MoneyAccess() {
             </button>
           </div>
           {links && !waiting && <p className="mt-2 text-sm text-zinc-500">This code isn&apos;t waiting anymore. Start again from Wade.</p>}
+        </section>
+      )}
+      {pending.length > 0 && (
+        <section className="rounded-2xl border border-zinc-200 bg-surface p-4 dark:border-zinc-800" data-testid="wade-pending">
+          <p className="font-semibold">Waiting for your approval</p>
+          <p className="mt-1 text-sm text-zinc-500">Only approve a code that Raven on your Mac is showing (or that Claude sent you) right now. Read only.</p>
+          <ul className="mt-2 flex flex-col gap-2">
+            {pending.map((l) => (
+              <li key={l.id} className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-mono text-xl tracking-widest">{l.userCode}</span>
+                <span className="text-sm text-zinc-500">asked {when(l.createdAt)} · expires {when(l.expiresAt)}</span>
+                <button type="button" className={buttonClass} disabled={busy}
+                  onClick={() => post("/api/wade/link/approve", { code: l.userCode }, "Approved. Raven can now read your money.")}>
+                  Approve
+                </button>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
       <section className="rounded-2xl border border-zinc-200 bg-surface p-4 dark:border-zinc-800">
