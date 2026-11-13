@@ -30,7 +30,8 @@ export function meetingRecord(m: Meeting, data: Pick<MeetingData, "profile">): M
       ["Start time", m.time ? `${timeLabel(m.time)} Eastern` : "Not recorded"],
       ["Topic", m.topic || "Not recorded"],
       ["Attendee", data.profile.name || "Not entered (add your name under Settings)"],
-      ["Attendance", m.state === "attended" ? "Attended" : m.state === "missed" ? "Did not attend" : "Not answered yet"],
+      // For an attended meeting, how the owner attended it.
+      ["Attendance", m.state === "attended" ? (m.format === "online" ? "Online" : "In person") : m.state === "missed" ? "Did not attend" : "Not answered yet"],
       ["Organizer confirmation", confirmation],
     ],
     takeaway: m.takeaway || m.audio?.takeaway || "",

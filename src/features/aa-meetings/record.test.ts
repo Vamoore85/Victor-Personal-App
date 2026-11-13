@@ -15,7 +15,7 @@ test("a meeting record shows the meeting, attendance, organizer status and takea
   const r = meetingRecord(meeting(), data);
   assert.deepEqual(Object.fromEntries(r.rows), {
     Meeting: "Sample Group Zoom (online, Zoom)", Date: "Thursday, November 12, 2026", "Start time": "8:00 PM Eastern", Topic: "Sample topic",
-    Attendee: "Sample Owner", Attendance: "Attended", "Organizer confirmation": "Pending (email from the meeting organizer not yet received)",
+    Attendee: "Sample Owner", Attendance: "Online", "Organizer confirmation": "Pending (email from the meeting organizer not yet received)",
   });
   assert.equal(r.takeaway, "One. Two. Three. Four.");
   assert.equal(r.fileBase, "2026-11-12 8 PM - Sample Group Zoom");
@@ -26,6 +26,7 @@ test("a meeting record shows the meeting, attendance, organizer status and takea
   assert.equal(meetingRecord(m, data).takeaway, "From the Mac.", "the Mac's audio takeaway fills a blank one");
   m.confirmations = [{ gmailId: "g", subject: "s", sender: "x", date: "2026-11-13T15:00:00Z", body: "", attachments: [], skippedAttachments: [], importedAt: at }];
   assert.equal(Object.fromEntries(meetingRecord(m, data).rows)["Organizer confirmation"], "Received November 13, 2026");
+  assert.equal(Object.fromEntries(meetingRecord(meeting({ format: "in-person", location: "Church hall" }), data).rows).Attendance, "In person");
 });
 
 test("the record is a real one-page PDF and a Word document with the same text", async () => {
@@ -39,6 +40,6 @@ test("the record is a real one-page PDF and a Word document with the same text",
   const method = zip.readUInt16LE(at + 8), size = zip.readUInt32LE(at + 18), nameLen = zip.readUInt16LE(at + 26), extra = zip.readUInt16LE(at + 28);
   const raw = zip.subarray(at + 30 + nameLen + extra, at + 30 + nameLen + extra + size);
   const xml = (method === 8 ? inflateRawSync(raw) : raw).toString("utf8");
-  for (const s of ["AA Meeting Record", "Sample Group Zoom (online, Zoom)", "8:00 PM Eastern", "Attended", "One. Two. Three. Four."]) assert.ok(xml.includes(s), s);
+  for (const s of ["AA Meeting Record", "Sample Group Zoom (online, Zoom)", "8:00 PM Eastern", "Online", "One. Two. Three. Four."]) assert.ok(xml.includes(s), s);
   assert.ok(!xml.includes("PRIVATE"));
 });
