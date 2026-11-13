@@ -30,6 +30,7 @@ export const LIFE_AREAS: readonly LifeArea[] = [
   { slug: "ideas", short: "Ideas", group: "work", label: "Ideas", blurb: "A free-form place to dump ideas", href: "/ideas" },
   { slug: "research", short: "Research", group: "work", label: "Research Center", blurb: "Questions, notes and sources", href: "/research" },
   { slug: "events", short: "Events", group: "work", label: "Events & Speakers", blurb: "Special events and speakers worth following", href: "/events" },
+  { slug: "aameetings", short: "AA", group: "life", label: "AA Meetings", blurb: "Meeting plans, attendance, records and court reports", href: "/aa-meetings" },
   { slug: "legacy", short: "Legacy", group: "life", label: "Legacy", blurb: "Will, final wishes and instructions, locked", href: "/legacy" },
   { slug: "health", short: "Health", group: "life", label: "Health & Fitness", blurb: "Workouts, weight, sleep, and habits", href: "/health" },
   { slug: "style", short: "Style", group: "life", label: "Fashion & Clothes", blurb: "Wardrobe, outfits, and wish list", href: "/style" },

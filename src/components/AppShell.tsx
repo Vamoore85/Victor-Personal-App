@@ -22,6 +22,8 @@ const BARE = ["/login", "/security", "/trust"];
 
 /** Phone tab bar: the screens used most. Everything else is under More. */
 const TABS = ["money", "accounts", "logins", "reports"];
+/** Always listed in the full navigation, outside the collapsed "More areas". */
+const PINNED = ["aameetings"];
 
 const live = [...LIFE_AREAS.filter((a) => a.href).map((a) => a.slug === "money" ? { ...a, label: "Money" } : a),
   { slug: "reports", short: "Reports", group: "work", label: "Reports", blurb: "Financial reports", href: "/reports" },
@@ -65,12 +67,13 @@ function NavItem({ href, icon, label, active, onNavigate }: { href: string; icon
 /** The full list of places to go, shared by the desktop sidebar and the phone/tablet menu. */
 function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
   const primary = TABS.map((slug) => live.find((a) => a.slug === slug)!);
-  const other = live.filter((a) => !TABS.includes(a.slug));
+  const pinned = PINNED.map((slug) => live.find((a) => a.slug === slug)!);
+  const other = live.filter((a) => !TABS.includes(a.slug) && !PINNED.includes(a.slug));
   return (
     <nav aria-label="Main" className="flex flex-col gap-4">
       <NavItem href="/" icon="home" label="Home" active={isActive(pathname, "/")} onNavigate={onNavigate} />
       <div className="flex flex-col gap-1">
-        {primary.map((a) => <NavItem key={a.slug} href={a.href!} icon={a.slug} label={a.label} active={isActive(pathname, a.href!)} onNavigate={onNavigate} />)}
+        {[...primary, ...pinned].map((a) => <NavItem key={a.slug} href={a.href!} icon={a.slug} label={a.label} active={isActive(pathname, a.href!)} onNavigate={onNavigate} />)}
       </div>
       <details key={pathname} open={other.some((a) => isActive(pathname, a.href!))}>
         <summary className="cursor-pointer rounded-lg px-2.5 py-3 text-sm font-medium text-zinc-600 dark:text-zinc-300">More areas</summary>
