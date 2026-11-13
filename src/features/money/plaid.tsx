@@ -25,6 +25,7 @@ declare global {
 }
 
 import { applySync, type SyncResult } from "./plaid-apply";
+import { rollBillsForward } from "./bill-intel";
 export { applySync, categoryFor, sameCharge } from "./plaid-apply";
 
 export { HISTORY_DONE };
@@ -305,7 +306,7 @@ async function runSync(link: BankLink, trigger: "first-sync" | "sync"): Promise<
         return current ? applySync(d, current, r) : d;
       });
       if (!r.hasMore) {
-        setMoneyData((d) => saveBriefing(d, trigger));
+        setMoneyData((d) => saveBriefing(rollBillsForward(d).data, trigger));
         return r.updateStatus || "OK";
       }
     }

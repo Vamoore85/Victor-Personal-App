@@ -1,6 +1,7 @@
 import { isCompany, type Account, type AccountType, type BankLink, type MoneyData, type Transaction } from "./types";
 import { isLiability } from "./calc";
 import { autoCategory, ruleCategory } from "./books";
+import { historyFolder } from "./accounts-fix";
 
 /*
  * Folding a Plaid sync into the money data. Plain functions with no browser
@@ -28,9 +29,14 @@ function accountType(a: SyncAccount): AccountType {
   return "checking";
 }
 
+/** A bank's own wording for a move between two of your accounts, e.g. "WEB XFER FROM CHK 0000…". */
+export const OWN_ACCOUNT_TRANSFER = /\b(XFER|TRANSFER)\b.*\b(FROM|TO)\b.*\b(CHK|CHECKING|SAV|SAVINGS|SHARE|MMA)\b/i;
+
 /** Maps Plaid's spending categories onto the Financial Center's. */
-export function categoryFor(plaidCategory: string, income: boolean) {
+export function categoryFor(plaidCategory: string, income: boolean, description = "") {
   const [primary, detailed = ""] = plaidCategory.split("|");
+  // Money moved between your own accounts is neither income nor spending (it used to land in "Other income" / "Other").
+  if (primary === "TRANSFER_IN" || primary === "TRANSFER_OUT" || OWN_ACCOUNT_TRANSFER.test(description)) return "Transfer";
   if (income) return detailed === "INCOME_WAGES" ? "Salary" : "Other income";
   switch (primary) {
     case "FOOD_AND_DRINK":
@@ -116,20 +122,40 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
   const kept = new Map(d.transactions.filter((t) => t.plaidId && changed.has(t.plaidId)).map((t) => [t.plaidId!, t]));
   const incoming: Transaction[] = [];
   const scope = link.scope ?? "personal";
-  const claimed = new Set<string>(); // statement rows that turned out to be this same bank transaction
+  const claimed = new Set<string>(); // statement rows (or copies from another connection) that turned out to be this same bank transaction
+  const covered = new Set<string>(); // records that already stand for a transaction arriving through a second connection
+  // A record delivered through a different connection to the same bank account. Older records don't say which
+  // connection brought them; on an account reached through more than one connection they count as possibly another.
+  const otherRoute = (t: Transaction) => (t.plaidLink ? t.plaidLink !== link.id : true);
+  const multiRoute = new Set(accounts.filter((a) => a.plaidAliases?.length).map((a) => a.id));
+  const sameDay = (t: Transaction, accountId: string, pt: SyncTxn, kind: Transaction["kind"]) =>
+    t.accountId === accountId && t.date === pt.date && t.kind === kind && Math.abs(t.amount - Math.abs(pt.amount)) < 0.005;
   for (const pt of changed.values()) {
     const accountId = idFor.get(pt.accountId);
     if (!accountId || pt.pending) continue;
-    // The same transaction already came in through the account's main connection.
-    if (viaAlias.has(pt.accountId) && !kept.has(pt.id) && existing.some((t) => t.accountId === accountId && t.date === pt.date && Math.abs(t.amount - Math.abs(pt.amount)) < 0.005)) continue;
-    const acctScope = accounts.find((a) => a.id === accountId)?.scope ?? scope; // you may have moved the account since connecting
     const income = pt.amount < 0; // Plaid: positive is money leaving the account
+    const kind: Transaction["kind"] = income ? "income" : "expense";
+    if (viaAlias.has(pt.accountId) && !kept.has(pt.id)) {
+      // The same transaction already came in through the account's main connection (or a statement): one record, not two.
+      // Matched one to one, so several real same-day charges of one amount are each kept once.
+      const there = existing.find((t) => !covered.has(t.id) && !claimed.has(t.id) && (!t.plaidId || otherRoute(t)) && sameDay(t, accountId, pt, kind));
+      if (there) {
+        covered.add(there.id);
+        continue;
+      }
+    }
+    const acctScope = accounts.find((a) => a.id === accountId)?.scope ?? scope; // you may have moved the account since connecting
     const prev =
       kept.get(pt.id) ??
       existing.find(
         (t) =>
-          (!t.plaidId || adopted.has(t.accountId)) && !claimed.has(t.id) && t.accountId === accountId && t.plaidId !== pt.id && sameCharge(t, pt.date, Math.abs(pt.amount), income ? "income" : "expense"),
-      );
+          (!t.plaidId || adopted.has(t.accountId)) && !claimed.has(t.id) && t.accountId === accountId && t.plaidId !== pt.id && sameCharge(t, pt.date, Math.abs(pt.amount), kind),
+      ) ??
+      // The main connection's copy of a transaction a second connection delivered first: it takes over that record
+      // (its id, category and links stay) instead of adding a second one. This was the 11/10 doubling.
+      (!viaAlias.has(pt.accountId) && multiRoute.has(accountId)
+        ? existing.find((t) => !!t.plaidId && t.plaidId !== pt.id && !claimed.has(t.id) && !covered.has(t.id) && otherRoute(t) && sameDay(t, accountId, pt, kind))
+        : undefined);
     if (prev && prev.plaidId !== pt.id) claimed.add(prev.id);
     incoming.push({
       id: prev?.id ?? crypto.randomUUID(),
@@ -142,11 +168,12 @@ export function applySync(d: MoneyData, link: BankLink, r: SyncResult): MoneyDat
         prev?.category ??
         (isCompany(acctScope)
           ? autoCategory(d.rules, pt.name, acctScope, income, pt.category)
-          : (ruleCategory(d.rules, pt.name, acctScope) ?? categoryFor(pt.category, income))),
+          : (ruleCategory(d.rules, pt.name, acctScope) ?? categoryFor(pt.category, income, pt.name))),
       categoryLocked: prev?.categoryLocked,
       accountId,
       transferId: prev?.transferId,
       plaidId: pt.id,
+      plaidLink: link.id,
     });
   }
   let transactions = [...existing.filter((t) => !claimed.has(t.id)), ...incoming];
@@ -205,7 +232,7 @@ export function mergeTwins(d: MoneyData, link: BankLink): MoneyData {
     }
   }
   if (!into.size) return d;
-  const seen = new Set(d.transactions.filter((t) => !into.has(t.accountId)).map((t) => `${t.accountId}|${t.date}|${t.amount}|${t.kind}|${t.description}`));
+  const already = historyFolder(d.transactions.filter((t) => !into.has(t.accountId)));
   const transactions: Transaction[] = [];
   for (const t of d.transactions) {
     const to = into.get(t.accountId);
@@ -213,9 +240,7 @@ export function mergeTwins(d: MoneyData, link: BankLink): MoneyData {
       transactions.push(t);
       continue;
     }
-    const key = `${to}|${t.date}|${t.amount}|${t.kind}|${t.description}`;
-    if (seen.has(key)) continue; // already on the connected account
-    seen.add(key);
+    if (already(t, to)) continue; // already on the connected account
     transactions.push({ ...t, accountId: to });
   }
   const re = (id: string | undefined) => (id && into.get(id)) || id;
