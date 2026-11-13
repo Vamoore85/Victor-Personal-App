@@ -161,7 +161,7 @@ test("report downloads include only confirmed rows and keep notes out by default
 
   const json = await (await downloadReport(req("/api/aa-meetings/report?from=2026-11-01&through=2026-11-30&format=json"), s, now)).json();
   assert.deepEqual(json.rows.map((r: { name: string }) => r.name), ["Right Turn Alumni", "Eldersburg Tuesday Night"]);
-  assert.deepEqual(json.totals, { meetings: 2, minutes: 150, withoutDuration: 0, withRecords: 1, selfReportedOnly: 1 });
+  assert.deepEqual(json.totals, { meetings: 2, minutes: 150, withoutDuration: 0, withRecords: 1, withOrganizerEmail: 0, selfReportedOnly: 1 });
   assert.equal(json.rows[1].records[0].sha256, createHash("sha256").update(jpeg).digest("hex"));
   assert.doesNotMatch(JSON.stringify(json), /PRIVATE NOTE/);
   assert.match(JSON.stringify(await (await downloadReport(req("/api/aa-meetings/report?from=2026-11-01&through=2026-11-30&format=json&notes=1"), s, now)).json()), /PRIVATE NOTE/);

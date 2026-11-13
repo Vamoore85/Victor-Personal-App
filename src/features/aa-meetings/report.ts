@@ -1,5 +1,5 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
-import { TIME_ZONE, dateLabel, reportMeetings, timeLabel, type Kind, type MeetingData } from "./model";
+import { ORGANIZER_EMAIL, SELF_REPORTED, TIME_ZONE, dateLabel, reportMeetings, timeLabel, type Kind, type MeetingData } from "./model";
 
 /*
  * The court attendance report. It lists only meetings the owner explicitly
@@ -11,15 +11,22 @@ import { TIME_ZONE, dateLabel, reportMeetings, timeLabel, type Kind, type Meetin
 
 export type ReportOptions = { from: string; through: string; kinds: Kind[]; includeTopics: boolean; includeNotes: boolean };
 export type ReportRecord = { ref: string; id: string; name: string; type: string; size: number; sha256: string; uploadedAt: string };
+export type ReportConfirmation = {
+  ref: string; label: typeof ORGANIZER_EMAIL; subject: string; sender: string; date: string; importedAt: string; gmailId: string;
+  attachments: { id: string; name: string; type: string; size: number; sha256: string }[];
+};
 export type ReportRow = {
   date: string; time: string; name: string; location: string; format: string; minutes: number | null; kind: Kind;
-  basis: string; confirmedAt: string; records: ReportRecord[]; topic?: string; note?: string;
+  basis: string; confirmedAt: string; records: ReportRecord[]; confirmations: ReportConfirmation[];
+  selfTimes?: { joined: string; left: string; label: typeof SELF_REPORTED; source: string };
+  topic?: string; note?: string;
 };
 export type Report = ReturnType<typeof buildReport>;
 
 export const STATEMENT = [
   "Each meeting listed was marked \"I attended\" by the account owner in Maverick Personal. Entries are self-reported.",
   "Where a supporting record is listed, the owner attached that file; it is referenced by name and SHA-256 hash so the original can be matched. An attached file is not independent verification by this app.",
+  "Where an organizer email confirmation is listed, it is an email the owner received, imported unchanged from the owner's Gmail and shown as received; it is not host verification. Join and leave times are self-reported.",
   "Planned meetings, calendar entries and meetings marked \"did not attend\" are not included. This document carries no signature, stamp or certification.",
 ];
 
@@ -32,13 +39,18 @@ export function parseOptions(q: URLSearchParams): ReportOptions {
 const publicLocation = (s: string) => (/https?:|www\.|zoom\.|teams\.|meet\.|pwd=|passcode|password/i.test(s) ? "Online (link withheld)" : s);
 
 export function buildReport(data: MeetingData, rev: number, o: ReportOptions, now = new Date()) {
-  let n = 0;
+  let n = 0, e = 0;
   const rows: ReportRow[] = reportMeetings(data, o.from, o.through, o.kinds).map((m) => {
-    const records = m.evidence.filter((e) => !e.withdrawnAt).map((e) => ({ ref: `R${++n}`, id: e.id, name: e.name, type: e.type, size: e.size, sha256: e.sha256, uploadedAt: e.uploadedAt }));
+    const records = m.evidence.filter((x) => !x.withdrawnAt).map((x) => ({ ref: `R${++n}`, id: x.id, name: x.name, type: x.type, size: x.size, sha256: x.sha256, uploadedAt: x.uploadedAt }));
+    const confirmations: ReportConfirmation[] = m.confirmations.map((c) => ({
+      ref: `E${++e}`, label: ORGANIZER_EMAIL, subject: c.subject, sender: c.sender, date: c.date, importedAt: c.importedAt, gmailId: c.gmailId,
+      attachments: c.attachments.map((a) => ({ id: a.id, name: a.name, type: a.type, size: a.size, sha256: a.sha256 })),
+    }));
+    const basis = [SELF_REPORTED, records.length ? `supporting record ${records.map((r) => r.ref).join(", ")}` : "", confirmations.length ? `${ORGANIZER_EMAIL} ${confirmations.map((c) => c.ref).join(", ")}` : ""].filter(Boolean).join("; ");
     return {
       date: m.date, time: m.time, name: m.name, location: publicLocation(m.location), format: m.format, minutes: m.minutes, kind: m.kind,
-      basis: records.length ? `Self-reported; supporting record ${records.map((r) => r.ref).join(", ")}` : "Self-reported",
-      confirmedAt: m.confirmedAt!, records,
+      basis, confirmedAt: m.confirmedAt!, records, confirmations,
+      ...(m.selfTimes ? { selfTimes: { joined: m.selfTimes.joined, left: m.selfTimes.left, label: SELF_REPORTED, source: m.selfTimes.source === "recording" ? "owner's own recording start and stop" : "entered by owner" } } : {}),
       ...(o.includeTopics && m.topic ? { topic: m.topic } : {}),
       ...(o.includeNotes && m.note ? { note: m.note } : {}),
     };
@@ -58,7 +70,8 @@ export function buildReport(data: MeetingData, rev: number, o: ReportOptions, no
       minutes: rows.reduce((s, r) => s + (r.minutes ?? 0), 0),
       withoutDuration: rows.filter((r) => r.minutes === null).length,
       withRecords: rows.filter((r) => r.records.length).length,
-      selfReportedOnly: rows.filter((r) => !r.records.length).length,
+      withOrganizerEmail: rows.filter((r) => r.confirmations.length).length,
+      selfReportedOnly: rows.filter((r) => !r.records.length && !r.confirmations.length).length,
     },
     statement: STATEMENT,
   };
@@ -72,9 +85,11 @@ const csvCell = (v: unknown) => {
 };
 export function reportCsv(r: Report) {
   const topics = r.rows.some((x) => x.topic), notes = r.rows.some((x) => x.note);
-  const head = ["Date", "Time (Eastern)", "Meeting", "Type", "Location", "Format", "Minutes", "Basis", "Owner confirmed at", "Supporting records (ref name sha256)", ...(topics ? ["Topic"] : []), ...(notes ? ["Private note"] : [])];
+  const head = ["Date", "Time (Eastern)", "Meeting", "Type", "Location", "Format", "Minutes", "Basis", "Owner confirmed at", "Supporting records (ref name sha256)", "Organizer email confirmations (ref date sender subject)", "Join and leave (self-reported)", ...(topics ? ["Topic"] : []), ...(notes ? ["Private note"] : [])];
   const rows = r.rows.map((x) => [x.date, x.time, x.name, x.kind, x.location, x.format, x.minutes ?? "", x.basis, x.confirmedAt,
-    x.records.map((e) => `${e.ref} ${e.name} ${e.sha256}`).join("; "), ...(topics ? [x.topic ?? ""] : []), ...(notes ? [x.note ?? ""] : [])]);
+    x.records.map((r) => `${r.ref} ${r.name} ${r.sha256}`).join("; "),
+    x.confirmations.map((c) => `${c.ref} ${c.date} ${c.sender} ${c.subject}${c.attachments.length ? ` [attachments: ${c.attachments.map((a) => `${a.name} ${a.sha256}`).join(", ")}]` : ""}`).join("; "),
+    x.selfTimes ? `${x.selfTimes.joined}-${x.selfTimes.left} (${x.selfTimes.source})` : "", ...(topics ? [x.topic ?? ""] : []), ...(notes ? [x.note ?? ""] : [])]);
   return [head, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }
 
@@ -136,7 +151,7 @@ export async function reportPdf(r: Report) {
   }
   y -= 6;
   const t = r.totals;
-  para(`Meetings attended: ${t.meetings}.  With a supporting record: ${t.withRecords}.  Self-reported only: ${t.selfReportedOnly}.  Recorded duration: ${t.minutes} minutes${t.withoutDuration ? ` (${t.withoutDuration} without a duration)` : ""}.`, 10, bold, ink, 8);
+  para(`Meetings attended: ${t.meetings}.  With a supporting record: ${t.withRecords}.  With an organizer email confirmation: ${t.withOrganizerEmail}.  Self-reported only: ${t.selfReportedOnly}.  Recorded duration: ${t.minutes} minutes${t.withoutDuration ? ` (${t.withoutDuration} without a duration)` : ""}.`, 10, bold, ink, 8);
   for (const s of r.statement) para(s, 9, font, muted, 3);
   y -= 8;
 
@@ -152,7 +167,10 @@ export async function reportPdf(r: Report) {
   for (const row of r.rows) {
     const cells = [dateLabel(row.date), timeLabel(row.time) || "-", `${row.name}${row.kind !== "AA" ? ` (${row.kind})` : ""}${row.format === "online" ? " - online" : ""}`, row.location || "-", row.minutes == null ? "-" : String(row.minutes), row.basis]
       .map((c, i) => wrap(c, font, 8.5, cols[i].w - 6));
-    const extra = [`Owner confirmed attendance ${row.confirmedAt}`, row.topic ? `Topic: ${row.topic}` : "", row.note ? `Private note: ${row.note}` : ""].filter(Boolean)
+    const extra = [`Owner confirmed attendance ${row.confirmedAt}`,
+      row.selfTimes ? `Join ${timeLabel(row.selfTimes.joined)}, leave ${timeLabel(row.selfTimes.left)} (${row.selfTimes.label}: ${row.selfTimes.source})` : "",
+      ...row.confirmations.map((c) => `${c.ref} ${c.label}: "${c.subject}" from ${c.sender}, ${c.date}`),
+      row.topic ? `Topic: ${row.topic}` : "", row.note ? `Private note: ${row.note}` : ""].filter(Boolean)
       .flatMap((s) => wrap(s, font, 8.5, W - 2 * M - cols[0].w));
     const tall = Math.max(...cells.map((c) => c.length));
     // The row's cells and its first detail line stay together; longer topics or notes continue on the next page.
@@ -177,6 +195,21 @@ export async function reportPdf(r: Report) {
     para("Original files are kept unchanged in the owner's private Maverick storage. The SHA-256 hash identifies each exact file.", 8.5, font, muted, 6);
     for (const e of records) {
       const lines = [`${e.ref}  ${e.name}  (${e.type}, ${Math.max(1, Math.round(e.size / 1024))} KB)  for ${e.meeting}`, `Attached ${e.uploadedAt}   File id ${e.id}`, `SHA-256 ${e.sha256}`]
+        .map((s, i) => ({ i, lines: wrap(s, i ? font : bold, 8, W - 2 * M) }));
+      ensure(lines.reduce((s, l) => s + l.lines.length, 0) * 10 + 6);
+      for (const l of lines) for (const text of l.lines) { page.drawText(text, { x: M, y: y - 8, size: 8, font: l.i ? font : bold, color: l.i ? muted : ink }); y -= 10; }
+      y -= 6;
+    }
+  }
+
+  const emails = r.rows.flatMap((row) => row.confirmations.map((c) => ({ ...c, meeting: `${dateLabel(row.date)} ${row.name}` })));
+  if (emails.length) {
+    y -= 14; ensure(60);
+    para("Organizer email confirmations", 12, bold, ink, 2);
+    para("Emails the owner received from meeting organizers, imported read-only from the owner's Gmail and kept with their attachments in private Maverick storage. Shown as received; not host verification.", 8.5, font, muted, 6);
+    for (const c of emails) {
+      const lines = [`${c.ref}  ${c.subject}  for ${c.meeting}`, `From ${c.sender}, sent ${c.date}. Imported ${c.importedAt}. Gmail id ${c.gmailId}`,
+        ...c.attachments.map((a) => `Attachment ${a.name} (${a.type}) SHA-256 ${a.sha256}`)]
         .map((s, i) => ({ i, lines: wrap(s, i ? font : bold, 8, W - 2 * M) }));
       ensure(lines.reduce((s, l) => s + l.lines.length, 0) * 10 + 6);
       for (const l of lines) for (const text of l.lines) { page.drawText(text, { x: M, y: y - 8, size: 8, font: l.i ? font : bold, color: l.i ? muted : ink }); y -= 10; }

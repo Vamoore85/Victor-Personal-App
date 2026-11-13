@@ -9,8 +9,10 @@ export function proxy(request: NextRequest) {
   // It returns counts only and never accepts an owner-session bypass for any other route.
   if (["/api/gmail/auto-scan","/api/gmail/history-scan"].includes(request.nextUrl.pathname)) return NextResponse.next();
   // Wade on Victor's Mac authenticates these with its own token in their handlers; starting a link reads nothing,
-  // and the others (status, money, Raven's read-only MCP) answer only for a token Victor approved from a full sign-in.
-  if (["/api/wade/link/start","/api/wade/link/status","/api/wade/money","/api/wade/mcp"].includes(request.nextUrl.pathname)) return NextResponse.next();
+  // and the others (status, money, Raven's read-only MCP, AA meeting transcription and organizer emails) answer only
+  // for a token Victor approved from a full sign-in, and refuse any request with a browser Origin.
+  if (["/api/wade/link/start","/api/wade/link/status","/api/wade/money","/api/wade/mcp",
+    "/api/wade/aa/pending","/api/wade/aa/audio","/api/wade/aa/result","/api/wade/aa/confirmation"].includes(request.nextUrl.pathname)) return NextResponse.next();
   const cookie = request.cookies.get(SESSION_COOKIE)?.value;
   if (validSession(cookie)) return NextResponse.next();
   const { pathname, search } = request.nextUrl;
