@@ -52,6 +52,10 @@ export type Meeting = {
   useClaudeTakeaway?: boolean;
   // Names the takeaway must never contain (other attendees). Private; never in reports.
   participants?: string[];
+  // A test entry: never in the printable attendance report or its totals, with its audio and emails.
+  test?: boolean;
+  // Audio uploads started but not finished; their parts are removed when the next upload for this meeting starts.
+  openUploads?: { id: string; at: string }[];
 };
 export type Rule = {
   id: string; name: string; weekday: number; time: string; location: string;
@@ -294,10 +298,10 @@ export function syncPlans(data: MeetingData, rules: Rule[], now: string) {
   return { ...data, rules, meetings };
 }
 
-/** Only meetings the owner explicitly confirmed as attended, within the range and of the chosen kinds. */
+/** Only meetings the owner explicitly confirmed as attended, within the range and of the chosen kinds. Test meetings never count. */
 export function reportMeetings(data: MeetingData, from: string, through: string, kinds: Kind[] = ["AA"]) {
   if (!validDate(from) || !validDate(through) || through < from) throw new Error("Choose a valid report date range.");
   return data.meetings
-    .filter((m) => m.state === "attended" && m.confirmedAt && !m.cancelled && kinds.includes(m.kind) && m.date >= from && m.date <= through)
+    .filter((m) => m.state === "attended" && m.confirmedAt && !m.cancelled && !m.test && kinds.includes(m.kind) && m.date >= from && m.date <= through)
     .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time) || a.name.localeCompare(b.name));
 }

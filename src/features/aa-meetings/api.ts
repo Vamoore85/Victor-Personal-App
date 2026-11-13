@@ -137,6 +137,12 @@ export async function postMeetings(req: Request, store: Store, now = new Date())
           next = logged(m, at, `Owner entered join ${joined} and leave ${left} (self-reported)`, { selfTimes: { joined, left, source: "manual", at } });
           break;
         }
+        case "set-test": {
+          const test = body.test === true;
+          if (test === (m.test === true)) return d;
+          next = logged(m, at, test ? "Owner marked this a test meeting (never in reports)" : "Owner cleared the test flag", { test });
+          break;
+        }
         case "delete-audio": {
           const a = m.audio ?? fail("This meeting has no audio.");
           cleanup = audioKeys(a);
@@ -248,10 +254,34 @@ export async function uploadAudio(req: Request, store: Store, now = new Date()) 
   const meeting = current.meetings.find((m) => m.id === meetingId);
   if (!meeting) return json({ error: "Meeting not found." }, 404);
   if (meeting.audio?.id === uploadId) return json({ error: "That upload is already saved." }, 409);
-  return q.get("finish") === "1" ? finishAudio(req, store, meeting, uploadId, now) : storeAudioPart(req, store, q, uploadId);
+  return q.get("finish") === "1" ? finishAudio(req, store, meeting, uploadId, now) : storeAudioPart(req, store, q, meeting, uploadId, now);
 }
 
-async function storeAudioPart(req: Request, store: Store, q: URLSearchParams, uploadId: string) {
+/**
+ * Starting an upload records it on the meeting. A meeting takes one upload at a time, so the parts of any
+ * earlier upload for it that never finished (a closed tab, a lost connection) are removed then.
+ */
+async function openUpload(store: Store, meetingId: string, uploadId: string, now: Date) {
+  let abandoned: string[] = [];
+  await updateMeetings(store, (d) => {
+    const m = d.meetings.find((x) => x.id === meetingId);
+    if (!m) return d;
+    abandoned = (m.openUploads ?? []).map((u) => u.id).filter((id) => id !== uploadId && id !== m.audio?.id);
+    const next = { ...m, openUploads: [{ id: uploadId, at: now.toISOString() }] };
+    return { ...d, meetings: d.meetings.map((x) => (x.id === m.id ? next : x)) };
+  });
+  for (const id of abandoned) for (let i = 0; i < MAX_PARTS; i++) await store.deleteFile(partKey(id, i)).catch(() => undefined);
+}
+async function closeUpload(store: Store, meetingId: string, uploadId: string) {
+  await updateMeetings(store, (d) => {
+    const m = d.meetings.find((x) => x.id === meetingId);
+    if (!m?.openUploads?.some((u) => u.id === uploadId)) return d;
+    const next = { ...m, openUploads: m.openUploads.filter((u) => u.id !== uploadId) };
+    return { ...d, meetings: d.meetings.map((x) => (x.id === m.id ? next : x)) };
+  }).catch(() => undefined);
+}
+
+async function storeAudioPart(req: Request, store: Store, q: URLSearchParams, meeting: Meeting, uploadId: string, now: Date) {
   const index = Number(q.get("part"));
   if (!Number.isInteger(index) || index < 0 || index >= MAX_PARTS) return json({ error: `Audio files can be up to ${MAX_AUDIO_MB} MB.` }, 413);
   let bytes: Buffer;
@@ -260,7 +290,10 @@ async function storeAudioPart(req: Request, store: Store, q: URLSearchParams, up
   if (!bytes.length) return json({ error: "The file is empty." }, 400);
   // The first part decides the type, so a non-audio file is refused before the rest is sent.
   if (index === 0 && !sniffAudio(bytes)) return json({ error: "Use an audio file: M4A, MP3, WAV, WebM or OGG." }, 415);
-  try { await store.putFile(partKey(uploadId, index), "application/octet-stream", bytes); }
+  try {
+    if (index === 0) await openUpload(store, meeting.id, uploadId, now);
+    await store.putFile(partKey(uploadId, index), "application/octet-stream", bytes);
+  }
   catch (e) { console.error("aa audio part", e); return json({ error: "Couldn't save the audio. Nothing was attached." }, 502); }
   return json({ part: index, size: bytes.length, sha256: sha(bytes) });
 }
@@ -271,7 +304,7 @@ async function finishAudio(req: Request, store: Store, meeting: Meeting, uploadI
   catch { return json({ error: "Use a valid request." }, 400); }
   const count = Number(body.parts);
   const drop = async () => { for (let i = 0; i < MAX_PARTS; i++) await store.deleteFile(partKey(uploadId, i)).catch(() => undefined); };
-  const refuse = async (error: string, status: number) => { await drop(); return json({ error }, status); };
+  const refuse = async (error: string, status: number) => { await drop(); await closeUpload(store, meeting.id, uploadId); return json({ error }, status); };
   if (!Number.isInteger(count) || count < 1 || count > MAX_PARTS) return refuse(`Audio files can be up to ${MAX_AUDIO_MB} MB.`, 413);
   const name = String(body.name ?? "");
   if (!extensionOk(name)) return refuse("Use an audio file: M4A, MP3, WAV, WebM or OGG.", 415);
@@ -303,16 +336,59 @@ async function finishAudio(req: Request, store: Store, meeting: Meeting, uploadI
       if (m.audio && body.replace !== true) fail("This meeting already has audio. Confirm that the new audio should replace it.");
       old = m.audio;
       const what = `${source === "recording" ? "Owner recorded" : "Owner imported"} meeting audio "${audio.name}" (SHA-256 ${audio.sha256.slice(0, 12)}…)${old ? `, replacing "${old.name}"` : ""}. Awaiting transcript on the Mac.`;
-      return replaceMeeting(d, m, logged(m, at, what, { audio, ...(times ? { selfTimes: times } : {}) }));
+      return replaceMeeting(d, m, logged(m, at, what, { audio, openUploads: (m.openUploads ?? []).filter((u) => u.id !== uploadId), ...(times ? { selfTimes: times } : {}) }));
     });
     for (const k of audioKeys(old)) await store.deleteFile(k).catch(() => undefined);
     return json({ data: saved.data, audio });
   } catch (e) {
-    await drop();
+    await drop(); await closeUpload(store, meeting.id, uploadId);
     if (e instanceof UserError) return json({ error: e.message }, /already has audio/.test(e.message) ? 409 : 404);
     console.error("aa audio link", e);
     return json({ error: "Couldn't attach the audio. Nothing was saved." }, 502);
   }
+}
+
+/**
+ * GET ?meetingId&play=1: the owner's stored audio for the browser's player, owner session only.
+ * Vercel caps a response at 4.5 MB, so each answer is at most one stored part (3.5 MB): the player asks
+ * with Range requests and gets 206 Partial Content for the bytes of the part that holds the start, and
+ * follows on. Every part is checked against its recorded SHA-256 before any of it is sent.
+ */
+export async function playAudio(req: Request, store: Store) {
+  const denied = guard(req, store, false); if (denied) return denied;
+  let a: MeetingAudio | undefined;
+  try { a = (await readMeetings(store)).meetings.find((m) => m.id === new URL(req.url).searchParams.get("meetingId"))?.audio; }
+  catch (e) { console.error("aa audio play", e); return json({ error: "Couldn't load the audio." }, 502); }
+  if (!a) return json({ error: "No audio." }, 404);
+  const total = a.size;
+  const range = req.headers.get("range");
+  let start = 0, end = total - 1;
+  if (range) {
+    const m = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+    if (!m || (!m[1] && !m[2])) return new Response(null, { status: 416, headers: { ...NO_STORE, "Content-Range": `bytes */${total}` } });
+    if (m[1]) { start = Number(m[1]); end = m[2] ? Math.min(Number(m[2]), total - 1) : total - 1; }
+    else { start = Math.max(0, total - Number(m[2])); }
+    if (start >= total || end < start) return new Response(null, { status: 416, headers: { ...NO_STORE, "Content-Range": `bytes */${total}` } });
+  }
+  // The part holding the first requested byte.
+  let offset = 0;
+  const part = a.parts.find((p) => { if (start < offset + p.size) return true; offset += p.size; return false; });
+  if (!part) return json({ error: "No audio." }, 404);
+  let file;
+  try { file = await store.getFile(partKey(a.id, part.index)); }
+  catch (e) { console.error("aa audio play part", e); return json({ error: "Couldn't load the audio." }, 502); }
+  if (!file || sha(file.data) !== part.sha256) return json({ error: "The stored audio doesn't match its recorded hash. It was not played." }, 409);
+  const last = Math.min(end, offset + part.size - 1);
+  const body = file.data.subarray(start - offset, last - offset + 1);
+  const whole = !range && last === total - 1;
+  return new Response(new Uint8Array(body), {
+    status: whole ? 200 : 206,
+    headers: {
+      "Content-Type": a.type, "Content-Length": String(body.length), "Accept-Ranges": "bytes",
+      ...(whole ? {} : { "Content-Range": `bytes ${start}-${last}/${total}` }),
+      "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff", "Content-Disposition": "inline",
+    },
+  });
 }
 
 /** GET ?meetingId: the owner's own transcript, as plain text. */

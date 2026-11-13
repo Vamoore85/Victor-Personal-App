@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 
 import { sessionToken } from "@/lib/auth";
 import { hashToken, WADE_LINKS_DOC, type WadeLink } from "@/lib/wade-link";
-import { downloadConfirmationFile, downloadTranscript, postMeetings, uploadAudio } from "./api";
+import { downloadConfirmationFile, downloadReport, downloadTranscript, playAudio, postMeetings, uploadAudio } from "./api";
 import { MAX_AUDIO_BYTES, NO_AUDIO, PART_BYTES, TAKEAWAY_UNAVAILABLE, TRANSCRIPT_FAILED, exactlyFour, sentences, sniffAudio } from "./audio";
 import { datesIn, matchConfirmation, timesIn } from "./confirmations";
 import { buildReport } from "./report";
@@ -287,4 +287,85 @@ test("report keeps organizer emails separate from self-reported, and never says 
   assert.equal(r.rows[0].selfTimes!.label, "Self-reported");
   assert.equal(r.totals.withOrganizerEmail, 1); assert.equal(r.totals.selfReportedOnly, 0);
   assert.doesNotMatch(JSON.stringify(r), /host[- ]verified/i);
+});
+
+test("owner playback: sign-in only, one hash-checked part per Range answer, reassembles exactly", async () => {
+  const { s, add } = await setup();
+  const id = await add("2026-11-11", "19:00", "Synthetic Wednesday Group");
+  const bytes = Buffer.concat([wav(1), Buffer.alloc(PART_BYTES + 1000, 7)]); // two parts
+  await upload(s, id, bytes);
+  const play = (range?: string, cookie = owner) => playAudio(new Request(`${base}/api/aa-meetings/audio?meetingId=${id}&play=1`, { headers: { ...(cookie ? { cookie } : {}), ...(range ? { range } : {}) } }), s);
+  assert.equal((await play("bytes=0-", "")).status, 401, "behind the owner's sign-in");
+  assert.equal((await playAudio(wadeReq(`/api/aa-meetings/audio?meetingId=${id}&play=1`), s)).status, 401, "a Mac token is not a sign-in");
+  const first = await play("bytes=0-");
+  assert.equal(first.status, 206);
+  assert.equal(first.headers.get("content-type"), "audio/wav");
+  assert.equal(first.headers.get("accept-ranges"), "bytes");
+  assert.equal(first.headers.get("content-range"), `bytes 0-${PART_BYTES - 1}/${bytes.length}`);
+  assert.ok(Number(first.headers.get("content-length")) <= PART_BYTES, "never more than one part, under Vercel's 4.5 MB cap");
+  // The player (or "Save audio") follows on with Range requests until it has the whole file.
+  const pieces: Buffer[] = [Buffer.from(await first.arrayBuffer())];
+  for (let at = pieces[0].length; at < bytes.length;) {
+    const r = await play(`bytes=${at}-`); assert.equal(r.status, 206);
+    const b = Buffer.from(await r.arrayBuffer()); pieces.push(b); at += b.length;
+  }
+  assert.deepEqual(Buffer.concat(pieces), bytes);
+  const mid = await play("bytes=100-199");
+  assert.deepEqual(Buffer.from(await mid.arrayBuffer()), bytes.subarray(100, 200));
+  const tail = await play("bytes=-10");
+  assert.deepEqual(Buffer.from(await tail.arrayBuffer()), bytes.subarray(bytes.length - 10));
+  assert.equal((await play(`bytes=${bytes.length}-`)).status, 416);
+  assert.equal((await play("items=0-")).status, 416);
+  const a = data(s).meetings[0].audio!;
+  s.files.get(`aa-audio-${a.id}-1`)!.data = Buffer.from("tampered");
+  assert.equal((await play(`bytes=${PART_BYTES}-`)).status, 409, "a part that fails its hash is not played");
+  assert.equal((await play("bytes=0-")).status, 206, "intact parts still play");
+});
+
+test("a small file plays whole without a Range header", async () => {
+  const { s, add } = await setup();
+  const id = await add("2026-11-11", "19:00", "Synthetic Wednesday Group");
+  const bytes = wav(1);
+  await upload(s, id, bytes);
+  const r = await playAudio(new Request(`${base}/api/aa-meetings/audio?meetingId=${id}&play=1`, { headers: { cookie: owner } }), s);
+  assert.equal(r.status, 200); assert.deepEqual(Buffer.from(await r.arrayBuffer()), bytes);
+});
+
+test("test meetings never appear in the attendance report or its totals", async () => {
+  const { s, add } = await setup();
+  await postMeetings(ownerReq("/api/aa-meetings", { action: "settings", name: "Sample Owner" }), s, now);
+  const real = await add("2026-11-10", "19:00", "Synthetic Tuesday Night");
+  const fake = await add("2026-11-11", "19:00", "Synthetic Test Run");
+  for (const id of [real, fake]) await postMeetings(ownerReq("/api/aa-meetings", { action: "status", id, state: "attended" }), s, now);
+  await upload(s, fake, wav(1));
+  await postMeetings(ownerReq("/api/aa-meetings", { action: "self-times", id: fake, joined: "19:00", left: "20:00" }), s, now);
+  await wadeConfirmation(wadeReq("/api/wade/aa/confirmation", { gmailId: "synthTest01", subject: "Attendance confirmation", sender: "o@example.org", date: "2026-11-11T23:30:00Z", body: "Thanks for attending on 11/11/2026." }), s, now);
+  assert.equal(data(s).meetings.find((m) => m.id === fake)!.confirmations.length, 1);
+  const r = await postMeetings(ownerReq("/api/aa-meetings", { action: "set-test", id: fake, test: true }), s, now);
+  assert.equal((await r.json()).data.meetings.find((m: { id: string }) => m.id === fake).test, true);
+  const json = await (await downloadReport(ownerReq("/api/aa-meetings/report?from=2026-11-01&through=2026-11-30&format=json"), s, now)).json();
+  assert.deepEqual(json.rows.map((x: { name: string }) => x.name), ["Synthetic Tuesday Night"]);
+  assert.equal(json.totals.meetings, 1); assert.equal(json.totals.withOrganizerEmail, 0);
+  assert.doesNotMatch(JSON.stringify(json), /Synthetic Test Run|synthTest01|Attendance confirmation/);
+  const csv = await (await downloadReport(ownerReq("/api/aa-meetings/report?from=2026-11-01&through=2026-11-30&format=csv"), s, now)).text();
+  assert.doesNotMatch(csv, /Synthetic Test Run/);
+  // Clearing the flag puts it back.
+  await postMeetings(ownerReq("/api/aa-meetings", { action: "set-test", id: fake, test: false }), s, now);
+  const back = await (await downloadReport(ownerReq("/api/aa-meetings/report?from=2026-11-01&through=2026-11-30&format=json"), s, now)).json();
+  assert.equal(back.totals.meetings, 2);
+});
+
+test("parts of an abandoned upload are removed when the next upload for that meeting starts", async () => {
+  const { s, add } = await setup();
+  const id = await add("2026-11-11", "19:00", "Synthetic Wednesday Group");
+  const abandoned = crypto.randomUUID();
+  const base = `/api/aa-meetings/audio?meetingId=${id}&uploadId=${abandoned}`;
+  assert.equal((await uploadAudio(ownerReq(`${base}&part=0`, wav(1)), s, now)).status, 200);
+  assert.equal((await uploadAudio(ownerReq(`${base}&part=1`, Buffer.alloc(100)), s, now)).status, 200);
+  assert.ok(s.files.has(`aa-audio-${abandoned}-0`) && s.files.has(`aa-audio-${abandoned}-1`));
+  const ok = await upload(s, id, wav(1));
+  assert.equal(ok.status, 200);
+  assert.equal([...s.files.keys()].some((k) => k.includes(abandoned)), false, "abandoned parts removed");
+  assert.ok(s.files.has(`aa-audio-${ok.uploadId}-0`), "the new audio is kept");
+  assert.deepEqual(data(s).meetings[0].openUploads, [], "nothing left open");
 });

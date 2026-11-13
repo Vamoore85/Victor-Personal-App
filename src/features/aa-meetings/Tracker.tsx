@@ -77,7 +77,7 @@ export function Tracker() {
     const active = data.meetings.filter((m) => !m.cancelled);
     const byDate = (a: Meeting, b: Meeting) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time);
     const today = easternToday(now);
-    const attended = active.filter((m) => m.state === "attended");
+    const attended = active.filter((m) => m.state === "attended" && !m.test);
     return {
       check: active.filter((m) => m.state === "scheduled" && hasStarted(m, now)).sort(byDate).reverse(),
       upcoming: active.filter((m) => m.state === "scheduled" && !hasStarted(m, now)).sort(byDate),
@@ -171,7 +171,7 @@ function MeetingCard({ m, data, busy, run, now }: Shared & { m: Meeting }) {
             {dateLabel(m.date)}{m.time ? ` · ${timeLabel(m.time)}` : ""}{m.minutes ? ` · ${m.minutes} min` : ""}{m.location ? ` · ${m.location}` : ""}{m.format === "online" ? " · Online" : ""}
           </p>
         </div>
-        <div className="flex flex-wrap gap-1">{m.kind !== "AA" && <Badge tone="plain">{m.kind}</Badge>}{m.source === "calendar" && <Badge tone="plain">From calendar</Badge>}{status}</div>
+        <div className="flex flex-wrap gap-1">{m.test && <Badge tone="bad">TEST</Badge>}{m.kind !== "AA" && <Badge tone="plain">{m.kind}</Badge>}{m.source === "calendar" && <Badge tone="plain">From calendar</Badge>}{status}</div>
       </div>
       {m.topic && <p className="mt-2 text-sm"><span className="text-zinc-500">Topic: </span>{m.topic}</p>}
 
@@ -189,6 +189,10 @@ function MeetingCard({ m, data, busy, run, now }: Shared & { m: Meeting }) {
         {m.state === "scheduled" && <button className={`${ghostButtonClass} min-h-11 lg:min-h-9`} disabled={busy} onClick={() => confirm("Remove this meeting from your plan? It stays in the change history.") && run(() => postJson({ action: "cancel", id: m.id }), () => "Removed from the plan.")}>Remove from plan</button>}
       </div>
 
+      <label className="mt-2 flex min-h-11 items-center gap-2 text-sm lg:min-h-9">
+        <input type="checkbox" checked={m.test === true} disabled={busy} onChange={(e) => run(() => postJson({ action: "set-test", id: m.id, test: e.target.checked }), () => e.target.checked ? "Marked as a test. It stays out of reports and their totals." : "Test flag cleared.")} />
+        Test (not for reports)
+      </label>
       <AudioPanel m={m} busy={busy} run={run} />
       {m.confirmations.length > 0 && (
         <div className="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">
@@ -308,6 +312,25 @@ function AudioPanel({ m, busy, run }: { m: Meeting; busy: boolean; run: Shared["
   // Read by the recorder's stop handler, which outlives the render that created it.
   const meta = useRef({ replace: false, startedAt: "", stoppedAt: "" });
   const a = m.audio;
+  const [saving, setSaving] = useState(false);
+
+  // The server answers at most one stored part per request, so the file is put back together here from Range requests.
+  async function saveCopy() {
+    if (!a) return;
+    setSaving(true);
+    try {
+      const pieces: ArrayBuffer[] = [];
+      for (let at = 0; at < a.size;) {
+        const res = await fetch(`/api/aa-meetings/audio?meetingId=${encodeURIComponent(m.id)}&play=1`, { headers: { Range: `bytes=${at}-` }, cache: "no-store" });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Couldn't load the audio.");
+        const piece = await res.arrayBuffer();
+        if (!piece.byteLength) throw new Error("Couldn't load the audio.");
+        pieces.push(piece); at += piece.byteLength;
+      }
+      download(new Blob(pieces, { type: a.type }), a.name);
+    } catch (e) { await run(async () => { throw e instanceof Error ? e : new Error("Couldn't load the audio."); }); }
+    finally { setSaving(false); }
+  }
 
   const stopTracks = () => { stream.current?.getTracks().forEach((t) => t.stop()); stream.current = null; };
   useEffect(() => () => { if (recorder.current?.state === "recording") recorder.current.stop(); stopTracks(); }, []);
@@ -386,6 +409,8 @@ function AudioPanel({ m, busy, run }: { m: Meeting; busy: boolean; run: Shared["
       {a && (
         <div className="mt-1 flex flex-col gap-1 text-sm">
           <div className="flex flex-wrap items-center gap-2">{status}<span className="break-all">{a.name}</span><span className="text-xs text-zinc-500">{formatSize(a.size)} · {a.source === "recording" ? "recorded" : "imported"} {new Date(a.uploadedAt).toLocaleDateString()} · SHA-256 {a.sha256.slice(0, 12)}…</span></div>
+          <audio controls preload="none" className="mt-1 w-full max-w-md" src={`/api/aa-meetings/audio?meetingId=${encodeURIComponent(m.id)}&play=1`} aria-label={`Play ${a.name}`} />
+          <button className="self-start text-sm text-brand underline" disabled={saving} onClick={() => void saveCopy()}>{saving ? "Preparing the file…" : "Save audio to this device"}</button>
           {a.reason && <p className="text-xs text-zinc-500">{a.status === "failed" ? "Reason" : "Note"}: {a.reason}</p>}
           {a.status === "transcribed" && (
             <>
