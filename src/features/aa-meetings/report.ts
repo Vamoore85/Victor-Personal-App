@@ -140,7 +140,7 @@ export async function reportPdf(r: Report) {
   const facts: [string, string][] = [
     ["Name", r.name || "(not entered)"], ["Court", r.court || "(not entered)"], ["Case number(s)", r.caseNumbers || "(not entered)"],
     ["Period", `${dateLabel(r.from)} through ${dateLabel(r.through)}`], ["Meeting types", r.kinds.join(", ")],
-    ["Times", "Eastern (America/New_York)"], ["Generated", `${r.generatedAtLocal} (${r.generatedAt})`], ["Source", r.source],
+    ["Times", "Eastern (America/New_York)"],
   ];
   for (const [k, v] of facts) {
     const lines = wrap(v, font, 10, W - 2 * M - 105);
@@ -152,7 +152,6 @@ export async function reportPdf(r: Report) {
   y -= 6;
   const t = r.totals;
   para(`Meetings attended: ${t.meetings}.  With a supporting record: ${t.withRecords}.  With an organizer email confirmation: ${t.withOrganizerEmail}.  Self-reported only: ${t.selfReportedOnly}.  Recorded duration: ${t.minutes} minutes${t.withoutDuration ? ` (${t.withoutDuration} without a duration)` : ""}.`, 10, bold, ink, 8);
-  for (const s of r.statement) para(s, 9, font, muted, 3);
   y -= 8;
 
   const cols = [{ h: "Date", w: 82 }, { h: "Time", w: 50 }, { h: "Meeting", w: 140 }, { h: "Location", w: 100 }, { h: "Min", w: 28 }, { h: "Basis", w: W - 2 * M - 400 }];
@@ -192,7 +191,6 @@ export async function reportPdf(r: Report) {
   if (records.length) {
     y -= 14; ensure(60);
     para("Supporting records referenced", 12, bold, ink, 2);
-    para("Original files are kept unchanged in the owner's private Maverick storage. The SHA-256 hash identifies each exact file.", 8.5, font, muted, 6);
     for (const e of records) {
       const lines = [`${e.ref}  ${e.name}  (${e.type}, ${Math.max(1, Math.round(e.size / 1024))} KB)  for ${e.meeting}`, `Attached ${e.uploadedAt}   File id ${e.id}`, `SHA-256 ${e.sha256}`]
         .map((s, i) => ({ i, lines: wrap(s, i ? font : bold, 8, W - 2 * M) }));
