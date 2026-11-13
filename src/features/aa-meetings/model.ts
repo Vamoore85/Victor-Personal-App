@@ -18,12 +18,40 @@ export type Evidence = {
   withdrawnAt?: string;
 };
 export type HistoryEntry = { at: string; action: string };
+
+/** How a fact about attendance is known. "Host-verified" exists only for an imported Zoom host report (not built). */
+export const SELF_REPORTED = "Self-reported";
+export const ORGANIZER_EMAIL = "Organizer email confirmation";
+
+export type AudioPart = { index: number; size: number; sha256: string };
+export type AudioStatus = "awaiting-transcript" | "transcribed" | "no-audio" | "failed";
+/** One audio file per meeting, recorded or imported by the owner, stored privately in parts. */
+export type MeetingAudio = {
+  id: string; source: "recording" | "import"; name: string; type: string; size: number; sha256: string; parts: AudioPart[];
+  uploadedAt: string; status: AudioStatus;
+  // Set by the Mac worker: a fixed result label, an optional technical reason, the takeaway and which engine wrote it.
+  result?: string; reason?: string; takeaway?: string; takeawayEngine?: "local" | "claude"; hasTranscript?: boolean; processedAt?: string;
+};
+/** Join and leave times (Eastern HH:MM) from the owner's own Start/Stop or typed by hand. Always self-reported. */
+export type SelfTimes = { joined: string; left: string; source: "recording" | "manual"; at: string };
+export type ConfirmationFile = { id: string; name: string; type: string; size: number; sha256: string };
+/** An organizer's confirmation email imported read-only from the owner's Gmail; the Gmail message id is the dedupe key. */
+export type OrganizerConfirmation = {
+  gmailId: string; subject: string; sender: string; date: string; body: string;
+  attachments: ConfirmationFile[]; skippedAttachments: string[]; importedAt: string;
+  matchedBy?: string; reviewReason?: string; dismissedAt?: string;
+};
 export type Meeting = {
   id: string; date: string; time: string; name: string; location: string;
   format: "in-person" | "online"; minutes: number | null; kind: Kind; state: Attendance;
   topic: string; note: string; source: "manual" | "recurring-plan" | "calendar"; sourceId?: string;
   cancelled?: boolean; confirmedAt?: string; createdAt: string; updatedAt: string;
   evidence: Evidence[]; history: HistoryEntry[];
+  audio?: MeetingAudio; selfTimes?: SelfTimes; confirmations: OrganizerConfirmation[];
+  // Off unless the owner turns it on for this meeting: the takeaway is otherwise written by the local model on the Mac.
+  useClaudeTakeaway?: boolean;
+  // Names the takeaway must never contain (other attendees). Private; never in reports.
+  participants?: string[];
 };
 export type Rule = {
   id: string; name: string; weekday: number; time: string; location: string;
@@ -32,6 +60,8 @@ export type Rule = {
 export type Profile = { name: string; reportTitle: string; court: string; caseNumbers: string };
 export type MeetingData = {
   version: 1; meetings: Meeting[]; rules: Rule[]; profile: Profile; topics: string[];
+  // Organizer emails that matched no meeting, or more than one: the owner decides; nothing is guessed.
+  needsReview: OrganizerConfirmation[];
 };
 
 const SEED_RULES: Rule[] = [
@@ -39,7 +69,7 @@ const SEED_RULES: Rule[] = [
   { id: "tuesday-night", name: "Eldersburg Tuesday Night", weekday: 2, time: "", location: "Eldersburg", format: "in-person", minutes: null, kind: "AA", enabled: true },
 ];
 export const EMPTY: MeetingData = {
-  version: 1, meetings: [], rules: SEED_RULES, topics: [FIRST_TOPIC],
+  version: 1, meetings: [], rules: SEED_RULES, topics: [FIRST_TOPIC], needsReview: [],
   profile: { name: "", reportTitle: "AA Meeting Attendance Record", court: "", caseNumbers: "" },
 };
 
@@ -93,6 +123,10 @@ export function guessKind(title: string): Kind {
   return "AA";
 }
 
+function normalizeConfirmation(c: Partial<OrganizerConfirmation>): OrganizerConfirmation {
+  return { ...(c as OrganizerConfirmation), attachments: Array.isArray(c.attachments) ? c.attachments : [], skippedAttachments: Array.isArray(c.skippedAttachments) ? c.skippedAttachments : [] };
+}
+
 function normalizeMeeting(raw: Partial<Meeting>): Meeting {
   return {
     ...(raw as Meeting), topic: typeof raw.topic === "string" ? raw.topic : "", kind: kindOf(raw.kind),
@@ -100,6 +134,9 @@ function normalizeMeeting(raw: Partial<Meeting>): Meeting {
     location: typeof raw.location === "string" ? raw.location : "", format: formatOf(raw.format), minutes: raw.minutes ?? null,
     evidence: Array.isArray(raw.evidence) ? raw.evidence.map((e) => ({ ...e, size: Number(e.size) || 0 })) : [],
     history: Array.isArray(raw.history) ? raw.history : [],
+    confirmations: Array.isArray(raw.confirmations) ? raw.confirmations.map(normalizeConfirmation) : [],
+    useClaudeTakeaway: raw.useClaudeTakeaway === true,
+    participants: Array.isArray(raw.participants) ? raw.participants.filter((p) => typeof p === "string") : [],
   };
 }
 export function normalize(raw: unknown): MeetingData {
@@ -112,6 +149,7 @@ export function normalize(raw: unknown): MeetingData {
     // Seeded once; after that the owner's list is kept as saved, even if emptied.
     topics: Array.isArray(d.topics) ? d.topics.filter((t) => typeof t === "string") : [FIRST_TOPIC],
     profile: { ...EMPTY.profile, ...d.profile },
+    needsReview: Array.isArray(d.needsReview) ? d.needsReview.map(normalizeConfirmation) : [],
   };
 }
 
@@ -140,7 +178,7 @@ export function sameMeeting(a: Pick<Meeting, "date" | "name" | "time">, b: Pick<
 
 export function createMeeting(raw: Record<string, unknown>, id: string, now: string, source: Meeting["source"] = "manual"): Meeting {
   const label = source === "manual" ? "Added by owner as planned" : source === "calendar" ? "Imported from a calendar file as planned (scheduling evidence only)" : "Created from a recurring plan";
-  return { ...meetingInput(raw), id, source, sourceId: text(raw.sourceId, 500) || undefined, state: "scheduled", evidence: [], history: [{ at: now, action: label }], createdAt: now, updatedAt: now };
+  return { ...meetingInput(raw), id, source, sourceId: text(raw.sourceId, 500) || undefined, state: "scheduled", evidence: [], confirmations: [], history: [{ at: now, action: label }], createdAt: now, updatedAt: now };
 }
 
 const log = (m: Meeting, now: string, action: string): Meeting => ({ ...m, updatedAt: now, history: [...m.history, { at: now, action }].slice(-200) });
