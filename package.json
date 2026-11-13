@@ -10,13 +10,13 @@
     "test": "node --import tsx --test 'src/**/*.test.ts'"
   },
   "dependencies": {
-    "@types/pg": "^8.11.10",
+    "@types/pg": "^8.23.1",
     "@types/qrcode": "^1.5.5",
     "ical.js": "2.2.1",
     "next": "16.4.3",
     "pdf-lib": "1.17.1",
     "pdfjs-dist": "6.4.299",
-    "pg": "^8.13.1",
+    "pg": "^8.23.1",
     "qrcode": "^1.5.4",
     "react": "19.3.0",
     "react-dom": "19.3.0"
