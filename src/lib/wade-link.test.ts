@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { randomBytes } from "node:crypto";
 import {
-  approveLink, bearer, findByToken, hashToken, linkStatus, LINK_DAYS, MAX_PENDING, normalizeCode, PENDING_MINUTES,
+  approveLink, bearer, findByToken, hashToken, linkStatus, ownerToken, LINK_DAYS, MAX_PENDING, normalizeCode, PENDING_MINUTES,
   publicLinks, revokeLink, startLink, validToken, type WadeLinks,
 } from "./wade-link";
 
@@ -63,4 +63,12 @@ test("codes and bearer headers are strict", () => {
   assert.equal(bearer("Bearer " + t), t);
   assert.equal(bearer("Bearer " + t + "x"), null);
   assert.equal(bearer(null), null);
+});
+
+test("the owner's paired Wade token is accepted only when its hash matches the configured one", () => {
+  const t = "A".repeat(43);
+  assert.equal(ownerToken(t, hashToken(t)), true);
+  assert.equal(ownerToken("B".repeat(43), hashToken(t)), false);
+  assert.equal(ownerToken(t, undefined), false);
+  assert.equal(ownerToken(t, "not-a-hash"), false);
 });

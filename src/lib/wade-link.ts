@@ -101,6 +101,16 @@ export function findByToken(state: WadeLinks, token: string) {
   return state.links.find((l) => validHash(l.tokenHash) && timingSafeEqual(Buffer.from(l.tokenHash, "hex"), want)) ?? null;
 }
 
+/**
+ * Victor's own Wade, paired once from his Mac with no code to approve (his choice, 2026-11-01): the Mac keeps the
+ * token in its Keychain and only the token's SHA-256 is set as WADE_OWNER_TOKEN_HASH here. It doesn't expire;
+ * removing that variable disconnects it. Compared in constant time.
+ */
+export function ownerToken(token: string, hash: string | undefined = process.env.WADE_OWNER_TOKEN_HASH): boolean {
+  if (!validHash(hash)) return false;
+  return timingSafeEqual(Buffer.from(hashToken(token), "hex"), Buffer.from(hash, "hex"));
+}
+
 export function linkStatus(link: WadeLink | null, now: number): "pending" | "approved" | "expired" | "revoked" | "unknown" {
   if (!link) return "unknown";
   if (link.status === "revoked") return "revoked";
