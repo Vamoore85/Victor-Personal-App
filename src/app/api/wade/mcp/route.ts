@@ -1,3 +1,4 @@
+// Read-only: this Wade MCP route only answers questions about money data and never changes anything.
 import { connection } from "next/server";
 import { cleanAccounts } from "@/features/money/accounts-fix";
 import { dbConfigured, readDoc } from "@/lib/db";
