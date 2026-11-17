@@ -48,6 +48,8 @@ export type Meeting = {
   cancelled?: boolean; confirmedAt?: string; createdAt: string; updatedAt: string;
   evidence: Evidence[]; history: HistoryEntry[];
   audio?: MeetingAudio; selfTimes?: SelfTimes; confirmations: OrganizerConfirmation[];
+  // The owner's own short takeaway for the meeting record; the Mac's audio takeaway is used when this is blank.
+  takeaway: string;
   // Off unless the owner turns it on for this meeting: the takeaway is otherwise written by the local model on the Mac.
   useClaudeTakeaway?: boolean;
   // Names the takeaway must never contain (other attendees). Private; never in reports.
@@ -134,7 +136,7 @@ function normalizeConfirmation(c: Partial<OrganizerConfirmation>): OrganizerConf
 function normalizeMeeting(raw: Partial<Meeting>): Meeting {
   return {
     ...(raw as Meeting), topic: typeof raw.topic === "string" ? raw.topic : "", kind: kindOf(raw.kind),
-    note: typeof raw.note === "string" ? raw.note : "", time: typeof raw.time === "string" ? raw.time : "",
+    note: typeof raw.note === "string" ? raw.note : "", takeaway: typeof raw.takeaway === "string" ? raw.takeaway : "", time: typeof raw.time === "string" ? raw.time : "",
     location: typeof raw.location === "string" ? raw.location : "", format: formatOf(raw.format), minutes: raw.minutes ?? null,
     evidence: Array.isArray(raw.evidence) ? raw.evidence.map((e) => ({ ...e, size: Number(e.size) || 0 })) : [],
     history: Array.isArray(raw.history) ? raw.history : [],
@@ -164,6 +166,7 @@ export function meetingInput(raw: Record<string, unknown>) {
     date: raw.date, time: timeOf(raw.time), name, location: text(raw.location), format: formatOf(raw.format),
     minutes: minutesOf(raw.minutes), kind: kindOf(raw.kind), topic: text(raw.topic, 300),
     note: typeof raw.note === "string" ? raw.note.trim().slice(0, 4000) : "",
+    takeaway: typeof raw.takeaway === "string" ? raw.takeaway.trim().replace(/\s+/g, " ").slice(0, 2000) : "",
   };
 }
 
@@ -201,14 +204,14 @@ export function cancel(m: Meeting, now: string): Meeting {
   return { ...log(m, now, "Owner removed this from the plan"), cancelled: true };
 }
 
-const FIELD_LABEL: Record<string, string> = { date: "date", time: "time", name: "name", location: "location", format: "format", minutes: "duration", kind: "type", topic: "topic", note: "private note" };
+const FIELD_LABEL: Record<string, string> = { date: "date", time: "time", name: "name", location: "location", format: "format", minutes: "duration", kind: "type", topic: "topic", note: "private note", takeaway: "takeaway" };
 export function edit(m: Meeting, raw: Record<string, unknown>, others: Meeting[], now: string): Meeting {
   const fields = meetingInput(raw);
   const next = { ...m, ...fields };
   if (others.some((x) => x.id !== m.id && !x.cancelled && sameMeeting(x, next))) throw new Error("That meeting is already in your tracker.");
   const changed = (Object.keys(fields) as (keyof typeof fields)[]).filter((k) => m[k] !== next[k]);
   if (!changed.length) return m;
-  const shown = (k: string, v: unknown) => (k === "note" ? "(private)" : v === null || v === "" ? "blank" : String(v));
+  const shown = (k: string, v: unknown) => (k === "note" ? "(private)" : k === "takeaway" ? (v ? "(text)" : "blank") : v === null || v === "" ? "blank" : String(v));
   const summary = changed.map((k) => `${FIELD_LABEL[k]} ${shown(k, m[k])} → ${shown(k, next[k])}`).join("; ");
   // Changing when or which meeting it was clears an attendance answer: it has to be confirmed again.
   const identity = changed.some((k) => k === "date" || k === "time" || k === "name");

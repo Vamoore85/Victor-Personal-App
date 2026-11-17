@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
 import { sessionToken } from "@/lib/auth";
-import { downloadEvidence, downloadReport, getMeetings, postMeetings, uploadEvidence } from "./api";
+import { downloadEvidence, downloadRecord, downloadReport, getMeetings, postMeetings, uploadEvidence } from "./api";
 import { DOC_KEY, type Store } from "./server";
 
 // Synthetic credentials (read at call time) and an in-memory stand-in for the private database.
@@ -173,4 +173,29 @@ test("report downloads include only confirmed rows and keep notes out by default
   assert.equal((await downloadReport(req("/api/aa-meetings/report?from=bad&through=2026-12-31&format=csv"), s, now)).status, 400);
   const backup = await (await downloadReport(req("/api/aa-meetings/report?format=backup"), s, now)).json();
   assert.equal(backup.attachmentBytesIncluded, false); assert.equal(backup.meetings.length, 3);
+});
+
+test("a meeting's own record downloads as PDF and Word for the owner only", async () => {
+  const s = memoryStore();
+  await post(s, { action: "settings", name: "Sample Owner" });
+  const added = await post(s, { action: "add", date: "2026-11-11", time: "20:00", name: "Sample Group Zoom", format: "online", location: "Zoom", topic: "Sample topic" });
+  const id = added.json.data.meetings[0].id;
+  await post(s, { action: "status", id, state: "attended" });
+  const takeaway = "One. Two. Three. Four.";
+  const saved = await post(s, { action: "edit", id, date: "2026-11-11", time: "20:00", name: "Sample Group Zoom", format: "online", location: "Zoom", topic: "Sample topic", takeaway });
+  const m = saved.json.data.meetings[0];
+  assert.equal(m.takeaway, takeaway); assert.equal(m.state, "attended", "adding a takeaway keeps the attendance answer");
+  assert.match(m.history.at(-1).action, /takeaway blank → \(text\)/);
+
+  const pdfRes = await downloadRecord(req(`/api/aa-meetings/record?id=${id}&format=pdf`), s);
+  assert.equal(pdfRes.status, 200); assert.equal(pdfRes.headers.get("content-type"), "application/pdf");
+  assert.match(pdfRes.headers.get("content-disposition")!, /2026-11-11 8 PM - Sample Group Zoom\.pdf/);
+  assert.equal(Buffer.from(await pdfRes.arrayBuffer()).subarray(0, 5).toString(), "%PDF-");
+  const docx = await downloadRecord(req(`/api/aa-meetings/record?id=${id}&format=docx`), s);
+  assert.equal(docx.status, 200);
+  const bytes = Buffer.from(await docx.arrayBuffer());
+  assert.equal(bytes.subarray(0, 2).toString(), "PK"); assert.ok(bytes.includes("word/document.xml"));
+  assert.equal((await downloadRecord(req(`/api/aa-meetings/record?id=${id}&format=pdf`, { cookie: "" }), s)).status, 401);
+  assert.equal((await downloadRecord(req(`/api/aa-meetings/record?id=missing&format=pdf`), s)).status, 404);
+  assert.equal((await downloadRecord(req(`/api/aa-meetings/record?id=${id}&format=exe`), s)).status, 400);
 });

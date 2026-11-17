@@ -64,7 +64,9 @@ test("PDF is a real Letter document with the disclaimer, record hashes and no se
   const bytes = await reportPdf(buildReport(data, 1, opts(), new Date(at)));
   assert.equal(Buffer.from(bytes.subarray(0, 5)).toString(), "%PDF-");
   const text = await pdfText(bytes);
-  assert.match(text, /Sample User - Test Data/); assert.match(text, /self-reported/i); assert.match(text, /no signature, stamp or certification/);
+  assert.match(text, /Sample User - Test Data/); assert.match(text, /Self-reported/);
+  // Victor asked for no statement paragraphs and no Generated/Source lines on the printed report.
+  assert.doesNotMatch(text, /no signature, stamp or certification|not independent verification|Generated|Source|kept unchanged/);
   assert.match(text, /SHA-256 c{64}/);
   assert.doesNotMatch(text, /PRIVATE|Planned but not confirmed|Treatment IOP/);
 });
@@ -103,7 +105,7 @@ async function textPositions(bytes: Uint8Array) {
 
 test("a maximum-length private note splits across pages instead of running past the footer", async () => {
   const data = sample();
-  const note = Array.from({ length: 400 }, (_, i) => `word${i}`).join(" ").slice(0, 4000);
+  const note = Array.from({ length: 700 }, (_, i) => `word${i}`).join(" ").slice(0, 4000); // the full 4,000-character limit
   data.meetings[0].note = note; data.meetings[0].topic = "T".repeat(10) + " " + "topic ".repeat(45);
   data.profile.reportTitle = "A very long report title ".repeat(6).trim();
   data.profile.name = "Sample Owner With An Unusually Long Name ".repeat(3).trim();
@@ -113,5 +115,5 @@ test("a maximum-length private note splits across pages instead of running past 
   assert.equal(footer.filter((t) => /Page \d+ of \d+/.test(t.text)).length, pdf.getPageCount(), "every page shows its page count");
   for (const t of out.filter((t) => t.y !== 26)) assert.ok(t.y >= 60, `text above the footer: "${t.text.slice(0, 30)}" at y=${t.y}`);
   assert.match(out.map((t) => t.text).join(" "), /\(continued\)/);
-  assert.match(out.map((t) => t.text).join(" "), /word399/, "the whole note is printed");
+  assert.match(out.map((t) => t.text).join(" "), new RegExp(note.split(" ").at(-1)!), "the whole note is printed");
 });
