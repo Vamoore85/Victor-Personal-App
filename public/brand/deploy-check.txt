@@ -1,0 +1,1 @@
+Maverick auto-deploy check, 2026-11-16. Served only to confirm Vercel builds main by itself after a merge.
